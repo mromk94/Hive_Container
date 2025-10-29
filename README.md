@@ -41,6 +41,7 @@ Canonical continuity layer for AI-Verse. Provides local encryption, Personality 
 - frontend.md — Frontend architecture & UI/UX spec
 - The_Shared_Consciousness_Loop_SCL.md — SCL whitepaper variant
 - SECURITY.md — Security policy and reporting guidance
+- CODE_OF_CONDUCT.md — Community standards and reporting
 
 ## Cross-Project Links
 - AI-Verse repository: https://github.com/mromk94/AIverse-Hub
