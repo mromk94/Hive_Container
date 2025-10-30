@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Hive Extension Demo</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body { font-family: system-ui, sans-serif; padding:16px; max-width: 720px; margin: 0 auto; }
+      button { padding:10px 12px; border-radius:8px; border:1px solid #ccc; cursor:pointer; background:#111; color:#fafafa; }
+      pre { white-space: pre-wrap; word-break: break-word; background:#0b0b0b; color:#eaeaea; padding:12px; border-radius:8px; border:1px solid #222; }
+      .row { margin-bottom: 12px; }
+    </style>
+  </head>
+  <body>
+    <h2>Hive Extension Demo</h2>
+    <div class="row">
+      <button id="btn-connect">Connect Hive</button>
+      <button id="btn-forward" disabled>Forward Example Request</button>
+    </div>
+    <div class="row"><strong>Status:</strong> <span id="status">Idle</span></div>
+    <div class="row">
+      <strong>Token:</strong>
+      <pre id="token">(none)</pre>
+    </div>
+    <div class="row">
+      <strong>Forward Response:</strong>
+      <pre id="response">(none)</pre>
+    </div>
+    <script>
+      const statusEl = document.getElementById('status');
+      const tokenEl = document.getElementById('token');
+      const respEl = document.getElementById('response');
+      const btnConnect = document.getElementById('btn-connect');
+      const btnForward = document.getElementById('btn-forward');
+
+      let sessionToken = null;
+
+      window.addEventListener('message', (evt) => {
+        const data = evt.data || {};
+        if (data.source === 'HIVE_CONNECT_RELAYED') {
+          statusEl.textContent = data.payload && data.payload.ok ? 'Connect relayed to extension' : 'Relay failed';
+        }
+        if (data.source === 'HIVE_SESSION_APPROVED') {
+          sessionToken = data.payload && data.payload.token;
+          tokenEl.textContent = JSON.stringify(sessionToken, null, 2);
+          statusEl.textContent = 'Session approved';
+          btnForward.disabled = !sessionToken;
+        }
+        if (data.source === 'HIVE_FORWARD_RESPONSE') {
+          respEl.textContent = JSON.stringify(data.payload, null, 2);
+          statusEl.textContent = (data.payload && data.payload.ok) ? 'Forward success' : 'Forward error';
+        }
+      }, false);
+
+      btnConnect.onclick = () => {
+        const sessionRequest = {
+          sessionId: 'hive_' + Math.random().toString(36).slice(2,10),
+          requestedScopes: ['persona.use'],
+          requestedPersona: 'default',
+          appOrigin: window.location.origin,
+          createdAt: Date.now()
+        };
+        window.postMessage({ source: 'HIVE_CONNECT_REQUEST', payload: sessionRequest }, window.origin);
+      };
+
+      btnForward.onclick = () => {
+        if (!sessionToken) { alert('No token yet'); return; }
+        const examplePayload = {
+          model: 'gpt-4o-mini',
+          messages: [ { role: 'user', content: 'Say hello from Hive.' } ]
+        };
+        window.postMessage({ source: 'HIVE_FORWARD_REQUEST', payload: { sessionToken, requestPayload: examplePayload } }, window.origin);
+      };
+    </script>
+  </body>
+</html>

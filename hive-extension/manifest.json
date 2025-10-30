@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Hive Container - Connector",
+  "version": "0.1.0",
+  "description": "Carry your AI persona into web apps with explicit consent.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "notifications"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "dist/background.js" },
+  "action": { "default_popup": "dist/popup.html", "default_title": "Hive Container" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/contentScript.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["dist/popup.html"], "matches": ["<all_urls>"] }
+  ]
+}
