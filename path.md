@@ -8,6 +8,7 @@ Root: /Users/mac/CascadeProjects/Hive_container
   - package.json
   - tsconfig.json
   - manifest.json
+  - README.md
   - icons/.gitkeep
   - src/
     - types.ts
@@ -16,6 +17,7 @@ Root: /Users/mac/CascadeProjects/Hive_container
     - popup.html
     - popup.ts
     - crypto.ts
+    - config.ts
   - demo/
     - index.html
   - dist/ (built)

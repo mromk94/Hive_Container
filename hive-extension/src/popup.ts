@@ -39,6 +39,17 @@ function renderSession() {
     <strong>Persona:</strong> ${pendingSession.requestedPersona || "default"} <br/>
     <strong>Scopes:</strong> ${pendingSession.requestedScopes.join(", ")}
   `;
+  const singleUseWrap = document.createElement("div");
+  const singleUse = document.createElement("input");
+  singleUse.type = "checkbox";
+  singleUse.id = "single-use";
+  singleUse.checked = true;
+  const singleUseLabel = document.createElement("label");
+  singleUseLabel.htmlFor = "single-use";
+  singleUseLabel.textContent = " Single-use token";
+  singleUseWrap.appendChild(singleUse);
+  singleUseWrap.appendChild(singleUseLabel);
+
   const approveBtn = document.createElement("button");
   approveBtn.className = "btn approve";
   approveBtn.textContent = "Approve";
@@ -49,6 +60,7 @@ function renderSession() {
   denyBtn.textContent = "Deny";
   denyBtn.onclick = () => { pendingSession = null; renderSession(); };
 
+  div.appendChild(singleUseWrap);
   div.appendChild(approveBtn);
   div.appendChild(denyBtn);
   sessionList.appendChild(div);
@@ -64,7 +76,7 @@ async function approveSession() {
   const signedToken = await new Promise<ClientSignedToken>((res) => {
     chrome.runtime.sendMessage({
       type: "HIVE_CREATE_TOKEN",
-      payload: { userId: user.userId, sessionId: pendingSession!.sessionId, scopes: pendingSession!.requestedScopes, origin: pendingSession!.appOrigin }
+      payload: { userId: user.userId, sessionId: pendingSession!.sessionId, scopes: pendingSession!.requestedScopes, origin: pendingSession!.appOrigin, singleUse: (document.getElementById("single-use") as HTMLInputElement)?.checked ?? false }
     }, (resp: any) => { res(resp.token); });
   });
 

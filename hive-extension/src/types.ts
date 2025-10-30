@@ -15,6 +15,7 @@ export type ClientSignedToken = {
   iat: number;
   signature: string;
   alg?: "ES256" | string;
+  singleUse?: boolean;
   origin?: string;
 };
 

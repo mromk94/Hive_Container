@@ -38,3 +38,11 @@
 - 21:23 Rebuilt extension; dist/background.js updated.
 - 21:26 Committing ES256 signing changes and updated background/types.
 - 21:27 Pushed ES256 signing changes to origin/main.
+- 21:30 Added single-use toggle in popup and passed to token creation.
+- 21:31 Implemented session revocation API and single-use enforcement in background (with used-token tracking).
+- 21:32 Rebuilt extension; background and popup bundles updated.
+- 21:34 Added README for hive-extension with features, setup, demo, security, permissions, roadmap.
+- 21:36 Added src/config.ts with origin allowlist helpers.
+- 21:37 Narrowed host_permissions and content_script matches in manifest.json to localhost + file URLs.
+- 21:38 Enforced allowlist checks in background for token creation and forwarding.
+- 21:39 Rebuilt extension; background updated with allowlist checks.
