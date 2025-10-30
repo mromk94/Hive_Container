@@ -15,6 +15,7 @@ Root: /Users/mac/CascadeProjects/Hive_container
     - contentScript.ts
     - popup.html
     - popup.ts
+    - crypto.ts
   - demo/
     - index.html
   - dist/ (built)

@@ -14,6 +14,7 @@ export type ClientSignedToken = {
   exp: number;
   iat: number;
   signature: string;
+  alg?: "ES256" | string;
   origin?: string;
 };
 

@@ -30,3 +30,11 @@
 - 21:11 If opening `demo/index.html` as file://, enable the extension option "Allow access to file URLs" so the content script runs on the demo page.
 - 21:14 Fixed load error: removed missing icon declarations from manifest.json and icons from web_accessible_resources. Reload the extension in chrome://extensions.
 - 21:15 Added .gitignore (ignore .DS_Store, node_modules, dist). Preparing to commit and push initial extension scaffold.
+- 21:16 Committed scaffold and blueprint/logs/path to git.
+- 21:17 Pushed to origin/main (commit 5d6c58f).
+- 21:20 Added ES256 WebCrypto utility (crypto.ts) for keypair and signing.
+- 21:21 Updated ClientSignedToken type to include alg.
+- 21:22 Integrated ES256 signing into background token creation.
+- 21:23 Rebuilt extension; dist/background.js updated.
+- 21:26 Committing ES256 signing changes and updated background/types.
+- 21:27 Pushed ES256 signing changes to origin/main.
