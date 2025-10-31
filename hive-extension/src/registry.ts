@@ -221,3 +221,28 @@ export async function setUserProfile(p: UserProfile | undefined): Promise<void> 
   const enc = await encryptToken(JSON.stringify(p));
   await new Promise((res)=>chrome.storage.local.set({ [USER_PROFILE_KEY]: enc }, ()=>res(null)));
 }
+
+// Per-domain consent logs
+export type ConsentEntry = { domain: string; scopes: string[]; ts: number };
+const CONSENT_KEY = 'hive_consent_logs';
+
+export async function getConsentLogs(): Promise<ConsentEntry[]> {
+  const obj = await new Promise<Record<string, any>>((res)=>chrome.storage.local.get([CONSENT_KEY], (i:any)=>res(i||{})));
+  const arr: ConsentEntry[] = Array.isArray(obj[CONSENT_KEY]) ? obj[CONSENT_KEY] : [];
+  return arr.filter(e=>typeof e?.domain==='string' && Array.isArray(e?.scopes) && typeof e?.ts==='number');
+}
+
+export async function addConsent(domain: string, scopes: string[]): Promise<void> {
+  const cur = await getConsentLogs();
+  const i = cur.findIndex(e=>e.domain===domain);
+  const set = new Set((i>=0 ? cur[i].scopes : []).concat(scopes || []));
+  const entry: ConsentEntry = { domain, scopes: Array.from(set), ts: Date.now() };
+  if (i>=0) cur[i] = entry; else cur.push(entry);
+  await new Promise((res)=>chrome.storage.local.set({ [CONSENT_KEY]: cur }, ()=>res(null)));
+}
+
+export async function removeConsent(domain: string): Promise<void> {
+  const cur = await getConsentLogs();
+  const next = cur.filter(e=>e.domain!==domain);
+  await new Promise((res)=>chrome.storage.local.set({ [CONSENT_KEY]: next }, ()=>res(null)));
+}

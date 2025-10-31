@@ -156,6 +156,15 @@
       <div style="margin-top:6px;"><button id="save-google-oauth" class="btn">Save Google OAuth</button></div>
       <div class="value" style="margin-top:6px;">We store tokens encrypted locally.</div>
     </div>
+    <div class="row">
+      <h4>Sites & Shares</h4>
+      <div id="consent-list">No sites have access yet.</div>
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <button id="refresh-consents" class="btn">Refresh Shares</button>
+        <button id="grant-current" class="btn">Grant Current Tab (minimal)</button>
+      </div>
+      <div class="value" style="margin-top:6px;">View and revoke domains you've granted access. "Grant Current" adds the active tab's domain with minimal scopes.</div>
+    </div>
     <hr/>
     <h4>Controls</h4>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">

@@ -1,6 +1,6 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import type { ProviderId } from "./registry";
-import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile, getUserProfile, setUserProfile, getUseWebSession, setUseWebSession } from "./registry";
+import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile, getUserProfile, setUserProfile, getUseWebSession, setUseWebSession, getConsentLogs, addConsent, removeConsent } from "./registry";
 import { getPublicKeyJwk, signStringES256 } from './crypto';
 import { getDefaultGoogleOAuth } from './config.oauth';
 
@@ -44,6 +44,10 @@ const oauthDeepseek = document.getElementById('oauth-deepseek') as HTMLButtonEle
 const googleClientIdInput = document.getElementById('google-client-id') as HTMLInputElement | null;
 const googleScopesInput = document.getElementById('google-scopes') as HTMLInputElement | null;
 const saveGoogleBtn = document.getElementById('save-google-oauth') as HTMLButtonElement | null;
+// Consent UI
+const consentList = document.getElementById('consent-list') as HTMLDivElement | null;
+const refreshConsentsBtn = document.getElementById('refresh-consents') as HTMLButtonElement | null;
+const grantCurrentBtn = document.getElementById('grant-current') as HTMLButtonElement | null;
 // Persona UI elements
 const personaName = document.getElementById("persona-name") as HTMLInputElement | null;
 const personaFormality = document.getElementById("persona-formality") as HTMLInputElement | null;
@@ -124,6 +128,14 @@ function renderChatApproval(){
   const denyBtn = document.getElementById('deny-in-chat') as HTMLButtonElement | null;
   const customizeBtn = document.getElementById('customize-in-chat') as HTMLButtonElement | null;
   approveBtn?.addEventListener('click', async ()=>{ await approveSession(); renderChatApproval(); });
+  denyBtn?.addEventListener('click', ()=>{
+    pendingSession = null;
+    chrome.storage.local.remove(["hive_pending_session"]);
+    renderSession();
+    renderChatApproval();
+  });
+  customizeBtn?.addEventListener('click', ()=>{ switchTab('config'); });
+}
 
 function getOriginsForProvider(p: ProviderId): string[] {
   if (p === 'openai') return ['https://chatgpt.com/*','https://*.openai.com/*'];
@@ -215,14 +227,45 @@ copyPublicKeyBtn?.addEventListener('click', async ()=>{
     alert('Public key copied');
   } catch (e) { alert('Copy failed: ' + String(e)); }
 });
-  denyBtn?.addEventListener('click', ()=>{
-    pendingSession = null;
-    chrome.storage.local.remove(["hive_pending_session"]);
-    renderSession();
-    renderChatApproval();
-  });
-  customizeBtn?.addEventListener('click', ()=>{ switchTab('config'); });
+
+async function refreshConsents(){
+  try {
+    const logs = await getConsentLogs();
+    if (!consentList) return;
+    if (!logs.length){ consentList.innerHTML = 'No sites have access yet.'; return; }
+    const rows = logs.map(e=>{
+      const when = new Date(e.ts).toLocaleString();
+      const scopes = (e.scopes||[]).join(', ');
+      return `<div style=\"display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--outline);\">\n        <div>\n          <div style=\"font-weight:600; color:#ddd;\">${e.domain}</div>\n          <div style=\"font-size:12px; color:var(--muted);\">${scopes || 'minimal'} • ${when}</div>\n        </div>\n        <button class=\"btn\" data-revoke=\"${e.domain}\">Revoke</button>\n      </div>`;
+    }).join('');
+    consentList.innerHTML = rows;
+  } catch { if (consentList) consentList.textContent = 'Error loading'; }
 }
+
+refreshConsentsBtn?.addEventListener('click', ()=>{ void refreshConsents(); });
+
+grantCurrentBtn?.addEventListener('click', ()=>{
+  try {
+    chrome.tabs.query({ active:true, currentWindow:true }, async (tabs:any[])=>{
+      const u = tabs && tabs[0] && tabs[0].url; if (!u) return alert('No active tab URL');
+      let host = '';
+      try { host = new URL(u).hostname; } catch { return alert('Invalid tab URL'); }
+      await addConsent(host, ['persona:minimal']);
+      alert('Granted minimal share for ' + host);
+      void refreshConsents();
+    });
+  } catch { /* noop */ }
+});
+
+consentList?.addEventListener('click', async (ev)=>{
+  const t = ev.target as HTMLElement;
+  if (t && t.matches('button[data-revoke]')){
+    const domain = t.getAttribute('data-revoke') || '';
+    if (!domain) return;
+    await removeConsent(domain);
+    void refreshConsents();
+  }
+});
 
 function switchTab(which: 'chat'|'config'|'profile'){
   if (!tabChat || !tabConfig || !tabChatBtn || !tabConfigBtn || !tabProfile) return;
@@ -367,6 +410,8 @@ async function initProviderUI() {
     if (useWebSessionEl) useWebSessionEl.checked = !!w;
     if (providerTokenInput) providerTokenInput.disabled = !!w;
   } catch {}
+  // Render consents
+  void refreshConsents();
 }
 
 async function initPersonaUI() {
