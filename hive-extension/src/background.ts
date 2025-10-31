@@ -1,7 +1,7 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import { signStringES256 } from "./crypto";
 import { isAllowedOrigin } from "./config";
-import { getRegistry, getPreferredModel } from "./registry";
+import { getRegistry, getPreferredModel, setPreferredModel } from "./registry";
 declare const chrome: any;
 
 const EXT_STORAGE_KEY = "hive_extension_user";
@@ -179,6 +179,8 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       if (active === "claude" && key && requestPayload) {
         try {
           const mapped = mapOpenAIToClaudeBody(requestPayload);
+          const prefClaude = await getPreferredModel("claude");
+          if (prefClaude) mapped.model = prefClaude;
           const resp = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: {
@@ -190,7 +192,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           });
           const json = await resp.json();
           if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
-          return sendResponse({ ok: resp.ok, response: json, status: resp.status });
+          return sendResponse({ ok: resp.ok, response: json, status: resp.status, usedUrl: "https://api.anthropic.com/v1/messages" });
         } catch (e) {
           if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
           return sendResponse({ ok: false, error: String(e) });
@@ -209,7 +211,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
             'gemini-1.5-flash-001',
             'gemini-1.5-pro',
             'gemini-1.5-pro-001'
-          ]));
+          ])).filter(Boolean);
           const tried: Array<{ url: string; status: number; body?: any }> = [];
           let lastJson: any = null;
           for (const model of candidateModels) {
@@ -226,6 +228,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
               const json = await resp.json();
               tried.push({ url: u, status: resp.status, body: json });
               if (resp.ok || resp.status !== 404) {
+                try { await setPreferredModel("gemini", model); } catch {}
                 if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
                 return sendResponse({ ok: resp.ok, response: json, status: resp.status, usedUrl: u, tried });
               }
@@ -260,6 +263,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
                   const json = await resp.json();
                   tried.push({ url: u, status: resp.status, body: json });
                   if (resp.ok || resp.status !== 404) {
+                    try { await setPreferredModel("gemini", name); } catch {}
                     if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
                     return sendResponse({ ok: resp.ok, response: json, status: resp.status, usedUrl: u, tried });
                   }
