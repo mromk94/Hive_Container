@@ -1,0 +1,1 @@
+import express from 'express';import jwt from 'jsonwebtoken';const app=express();app.post('/adapter/accept',(req,res)=>{res.json({ok:true})});app.listen(6000,()=>console.log('adapter up'))

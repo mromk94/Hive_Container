@@ -68,3 +68,9 @@ export async function signStringES256(data: string): Promise<ES256Signature> {
   );
   return { alg: "ES256", sig: bufferToBase64url(signature) };
 }
+
+export async function getPublicKeyJwk(): Promise<JsonWebKey> {
+  const kp = await getOrCreateES256();
+  const jwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
+  return jwk;
+}

@@ -1,0 +1,1 @@
+Quickstart: start bridge and mock ai, load extension in Chrome dev mode.

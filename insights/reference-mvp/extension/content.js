@@ -1,0 +1,1 @@
+(function(){if(location.pathname.startsWith('/demo')){const c=document.createElement('div');c.textContent='🐝 Hive: Inject persona';c.style='position:fixed;right:18px;bottom:18px;padding:8px;background:#ff8800;color:#fff;z-index:999999;';c.onclick=async()=>{alert('demo send');};document.body.appendChild(c)}})();

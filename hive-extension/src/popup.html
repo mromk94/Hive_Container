@@ -180,7 +180,11 @@
         <input id="profile-education" placeholder="e.g. BSc Computer Science" />
         <label for="profile-socials" style="margin-top:6px; display:block;">Social handles</label>
         <textarea id="profile-socials" placeholder="@x_handle, linkedin.com/in/you ..."></textarea>
-        <div style="margin-top:8px;"><button id="save-profile" class="btn">Save Profile</button></div>
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="save-profile" class="btn">Save Profile</button>
+          <button id="gen-signed-persona" class="btn">Generate Signed Persona</button>
+          <button id="copy-public-key" class="btn">Copy Public Key</button>
+        </div>
       </div>
       <div class="value">Stored encrypted locally. Shared with your AI for personalization.</div>
     </div>

@@ -1,0 +1,1 @@
+import express from 'express';const app=express();app.use(express.static('public'));app.post('/api/receivePersona',(req,res)=>{res.json({received:true})});app.listen(5000,()=>console.log('mock ai up'));

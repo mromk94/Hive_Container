@@ -1,0 +1,1 @@
+export function compressPersona(p){return {userId:p.userId||'anon',summary:(p.summary||'').slice(0,200),tone:p.tone||'neutral'}}

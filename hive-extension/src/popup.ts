@@ -1,6 +1,7 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import type { ProviderId } from "./registry";
 import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile, getUserProfile, setUserProfile, getUseWebSession, setUseWebSession } from "./registry";
+import { getPublicKeyJwk, signStringES256 } from './crypto';
 import { getDefaultGoogleOAuth } from './config.oauth';
 
 declare const chrome: any;
@@ -62,6 +63,8 @@ const profileInterests = document.getElementById('profile-interests') as HTMLInp
 const profileEducation = document.getElementById('profile-education') as HTMLInputElement | null;
 const profileSocials = document.getElementById('profile-socials') as HTMLTextAreaElement | null;
 const saveProfileBtn = document.getElementById('save-profile') as HTMLButtonElement | null;
+const genSignedPersonaBtn = document.getElementById('gen-signed-persona') as HTMLButtonElement | null;
+const copyPublicKeyBtn = document.getElementById('copy-public-key') as HTMLButtonElement | null;
 
 let pendingSession: SessionRequest | null = null;
 
@@ -122,11 +125,40 @@ function renderChatApproval(){
   const customizeBtn = document.getElementById('customize-in-chat') as HTMLButtonElement | null;
   approveBtn?.addEventListener('click', async ()=>{ await approveSession(); renderChatApproval(); });
 
+function getOriginsForProvider(p: ProviderId): string[] {
+  if (p === 'openai') return ['https://chatgpt.com/*','https://*.openai.com/*'];
+  if (p === 'claude') return ['https://claude.ai/*'];
+  if (p === 'grok') return ['https://x.ai/*'];
+  if (p === 'gemini') return ['https://gemini.google.com/*','https://*.google.com/*'];
+  if (p === 'deepseek') return ['https://deepseek.com/*','https://*.deepseek.com/*'];
+  return [];
+}
+
 useWebSessionEl?.addEventListener('change', async ()=>{
   const active = (providerSelect?.value || 'openai') as ProviderId;
   const on = !!useWebSessionEl?.checked;
-  await setUseWebSession(active, on);
-  if (providerTokenInput) providerTokenInput.disabled = on;
+  if (on) {
+    const origins = getOriginsForProvider(active);
+    if (!origins.length) { alert('Web session not supported for this provider'); useWebSessionEl.checked = false; return; }
+    try {
+      chrome.permissions.request({ origins }, async (granted: boolean)=>{
+        if (granted) {
+          await setUseWebSession(active, true);
+          if (providerTokenInput) providerTokenInput.disabled = true;
+        } else {
+          useWebSessionEl.checked = false;
+          await setUseWebSession(active, false);
+          alert('Permission not granted. Web session disabled.');
+        }
+      });
+    } catch {
+      useWebSessionEl.checked = false;
+      await setUseWebSession(active, false);
+    }
+  } else {
+    await setUseWebSession(active, false);
+    if (providerTokenInput) providerTokenInput.disabled = false;
+  }
 });
 
 saveProfileBtn?.addEventListener('click', async ()=>{
@@ -141,6 +173,47 @@ saveProfileBtn?.addEventListener('click', async ()=>{
   };
   await setUserProfile(p);
   alert('Profile saved');
+});
+
+function compressSnapshot(persona: any, user: any){
+  const clamp = (s:string,n:number)=> (s||'').toString().slice(0,n);
+  return {
+    name: clamp(persona?.name, 60),
+    tone: { formality: Number(persona?.tone?.formality ?? 50), concision: Number(persona?.tone?.concision ?? 50) },
+    keywords: clamp(persona?.keywords || '', 200),
+    bio: clamp(persona?.bio || '', 200),
+    rules: clamp(persona?.rules || '', 300),
+    user: {
+      personality: clamp(user?.personality || '', 500),
+      allergies: clamp(user?.allergies || '', 200),
+      preferences: clamp(user?.preferences || '', 400),
+      location: clamp(user?.location || '', 100),
+      interests: clamp(user?.interests || '', 300),
+      education: clamp(user?.education || '', 200),
+      socials: clamp(user?.socials || '', 300)
+    },
+    ts: Date.now()
+  };
+}
+
+genSignedPersonaBtn?.addEventListener('click', async ()=>{
+  try {
+    const persona = await getPersonaProfile();
+    const user = await getUserProfile();
+    const snapshot = compressSnapshot(persona, user);
+    const data = JSON.stringify(snapshot);
+    const sig = await signStringES256(data);
+    await new Promise((res)=>chrome.storage.local.set({ hive_signed_persona: { snapshot, sig } }, ()=>res(null)));
+    alert('Signed persona generated and stored.');
+  } catch (e) { alert('Failed: ' + String(e)); }
+});
+
+copyPublicKeyBtn?.addEventListener('click', async ()=>{
+  try {
+    const jwk = await getPublicKeyJwk();
+    await navigator.clipboard.writeText(JSON.stringify(jwk));
+    alert('Public key copied');
+  } catch (e) { alert('Copy failed: ' + String(e)); }
 });
   denyBtn?.addEventListener('click', ()=>{
     pendingSession = null;

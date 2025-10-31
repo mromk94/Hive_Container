@@ -28,6 +28,16 @@
     "https://deepseek.com/*",
     "https://*.deepseek.com/*"
   ],
+  "optional_host_permissions": [
+    "https://chatgpt.com/*",
+    "https://*.openai.com/*",
+    "https://claude.ai/*",
+    "https://x.ai/*",
+    "https://gemini.google.com/*",
+    "https://*.google.com/*",
+    "https://deepseek.com/*",
+    "https://*.deepseek.com/*"
+  ],
   "background": { "service_worker": "dist/background.js" },
   "action": { "default_popup": "dist/popup.html", "default_title": "Hive Container" },
   "content_scripts": [

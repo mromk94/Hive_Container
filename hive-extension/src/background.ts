@@ -347,37 +347,88 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
-        if (active === 'deepseek' && key) {
-          // Support DeepSeek via API key (official) or custom base URL (if token is a URL)
-          const isUrl = /^https?:\/\//i.test(String(key));
-          const base = isUrl ? String(key).trim().replace(/\/+$/, '') : 'https://api.deepseek.com';
-          const u = `${base}/v1/chat/completions`;
-          const headers: Record<string,string> = { 'Content-Type': 'application/json' };
-          if (!isUrl) headers['Authorization'] = `Bearer ${key}`;
-          const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers, body: JSON.stringify({ model: model || reg.prefModels?.deepseek || 'deepseek-chat', messages: finalMessages, temperature: 0.7 }) }, 15000);
-          const text = json?.choices?.[0]?.message?.content || '';
-          return sendResponse({ ok: resp.ok, text, raw: json });
+        if (active === 'deepseek') {
+          const useWeb = await getUseWebSession('deepseek');
+          const mappedBody = { model: model || reg.prefModels?.deepseek || 'deepseek-chat', messages: finalMessages, temperature: 0.7 };
+          if (useWeb) {
+            const tabs = await findProviderTabs('deepseek');
+            if (tabs.length) {
+              const u = 'https://api.deepseek.com/v1/chat/completions';
+              const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(mappedBody) }, []);
+              if (r && r.ok) {
+                const text = r.data?.choices?.[0]?.message?.content || '';
+                return sendResponse({ ok: true, text, raw: r.data, via: 'web_session' });
+              }
+              return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+            }
+            return sendResponse({ ok: false, error: 'web_session_not_found' });
+          }
+          if (key) {
+            const isUrl = /^https?:\/\//i.test(String(key));
+            const base = isUrl ? String(key).trim().replace(/\/+$/, '') : 'https://api.deepseek.com';
+            const u = `${base}/v1/chat/completions`;
+            const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+            if (!isUrl) headers['Authorization'] = `Bearer ${key}`;
+            const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers, body: JSON.stringify(mappedBody) }, 15000);
+            const text = json?.choices?.[0]?.message?.content || '';
+            return sendResponse({ ok: resp.ok, text, raw: json });
+          }
+          return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
-        if (active === 'grok' && key) {
-          // Require a base URL for Grok for now (OpenAI-compatible servers). If not a URL, ask for base URL.
-          const isUrl = /^https?:\/\//i.test(String(key));
-          if (!isUrl) return sendResponse({ ok: false, error: 'grok_requires_base_url_token' });
-          const base = String(key).trim().replace(/\/+$/, '');
-          const u = `${base}/v1/chat/completions`;
-          const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: model || reg.prefModels?.grok || 'grok', messages: finalMessages, temperature: 0.7 }) }, 15000);
-          const text = json?.choices?.[0]?.message?.content || '';
-          return sendResponse({ ok: resp.ok, text, raw: json });
+        if (active === 'grok') {
+          const useWeb = await getUseWebSession('grok');
+          const mappedBody = { model: model || reg.prefModels?.grok || 'grok', messages: finalMessages, temperature: 0.7 };
+          if (useWeb) {
+            const tabs = await findProviderTabs('grok');
+            if (tabs.length) {
+              const u = 'https://api.x.ai/v1/chat/completions';
+              const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(mappedBody) }, []);
+              if (r && r.ok) {
+                const text = r.data?.choices?.[0]?.message?.content || '';
+                return sendResponse({ ok: true, text, raw: r.data, via: 'web_session' });
+              }
+              return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+            }
+            return sendResponse({ ok: false, error: 'web_session_not_found' });
+          }
+          if (key) {
+            const isUrl = /^https?:\/\//i.test(String(key));
+            if (!isUrl) return sendResponse({ ok: false, error: 'grok_requires_base_url_token' });
+            const base = String(key).trim().replace(/\/+$/, '');
+            const u = `${base}/v1/chat/completions`;
+            const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mappedBody) }, 15000);
+            const text = json?.choices?.[0]?.message?.content || '';
+            return sendResponse({ ok: resp.ok, text, raw: json });
+          }
+          return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
-        if (active === 'claude' && key) {
+        if (active === 'claude') {
+          const useWeb = await getUseWebSession('claude');
           const mapped = mapOpenAIToClaudeBody({ model: model || reg.prefModels?.claude, messages: finalMessages });
-          const { resp, json } = await fetchJsonWithTimeout('https://api.anthropic.com/v1/messages', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key as string, 'anthropic-version': '2023-06-01' },
-            body: JSON.stringify(mapped)
-          }, 15000);
-          const text = Array.isArray(json?.content) && json.content[0]?.text ? json.content[0].text : '';
-          return sendResponse({ ok: resp.ok, text, raw: json });
+          if (useWeb) {
+            const tabs = await findProviderTabs('claude');
+            if (tabs.length) {
+              const u = 'https://api.anthropic.com/v1/messages';
+              const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers: { 'Content-Type':'application/json', 'anthropic-version': '2023-06-01' }, body: JSON.stringify(mapped) }, []);
+              if (r && r.ok) {
+                const text = Array.isArray(r.data?.content) && r.data.content[0]?.text ? r.data.content[0].text : '';
+                return sendResponse({ ok: true, text, raw: r.data, via: 'web_session' });
+              }
+              return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+            }
+            return sendResponse({ ok: false, error: 'web_session_not_found' });
+          }
+          if (key) {
+            const { resp, json } = await fetchJsonWithTimeout('https://api.anthropic.com/v1/messages', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key as string, 'anthropic-version': '2023-06-01' },
+              body: JSON.stringify(mapped)
+            }, 15000);
+            const text = Array.isArray(json?.content) && json.content[0]?.text ? json.content[0].text : '';
+            return sendResponse({ ok: resp.ok, text, raw: json });
+          }
+          return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
         if (active === 'gemini') {
