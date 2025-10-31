@@ -5,6 +5,10 @@ declare const chrome: any;
 const sessionList = document.getElementById("session-list")!;
 const userInfo = document.getElementById("user-info")!;
 const setSample = document.getElementById("set-sample-user")!;
+const saveOpenAI = document.getElementById("save-openai") as HTMLButtonElement | null;
+const clearOpenAI = document.getElementById("clear-openai") as HTMLButtonElement | null;
+const revokeLast = document.getElementById("revoke-last") as HTMLButtonElement | null;
+const openAIInput = document.getElementById("openai-token") as HTMLInputElement | null;
 
 let pendingSession: SessionRequest | null = null;
 
@@ -23,6 +27,16 @@ chrome.runtime.onMessage.addListener((msg: any) => {
   if (msg?.type === "SHOW_SESSION_REQUEST") {
     pendingSession = msg.payload as SessionRequest;
     renderSession();
+  }
+});
+
+// Initialize from storage in case popup opened before runtime message arrives
+chrome.storage.local.get(["hive_pending_session"], (items: any) => {
+  const s = items["hive_pending_session"] as SessionRequest | undefined;
+  if (s) {
+    pendingSession = s;
+    renderSession();
+    chrome.storage.local.remove(["hive_pending_session"]);
   }
 });
 
@@ -58,7 +72,11 @@ function renderSession() {
   const denyBtn = document.createElement("button");
   denyBtn.className = "btn deny";
   denyBtn.textContent = "Deny";
-  denyBtn.onclick = () => { pendingSession = null; renderSession(); };
+  denyBtn.onclick = () => {
+    pendingSession = null;
+    chrome.storage.local.remove(["hive_pending_session"]);
+    renderSession();
+  };
 
   div.appendChild(singleUseWrap);
   div.appendChild(approveBtn);
@@ -86,6 +104,7 @@ async function approveSession() {
   });
 
   pendingSession = null;
+  chrome.storage.local.remove(["hive_pending_session"]);
   renderSession();
 }
 
@@ -94,6 +113,40 @@ setSample.addEventListener("click", () => {
   chrome.storage.local.set({ hive_extension_user: sampleUser }, () => {
     renderUser();
     alert("Sample user stored (dev). Replace token in real flow.");
+  });
+});
+
+saveOpenAI?.addEventListener("click", () => {
+  const key = (openAIInput?.value || "").trim();
+  chrome.storage.local.get(["hive_extension_user"], (i:any) => {
+    const user = i["hive_extension_user"] || { userId: "dev_user", displayName: "Dev User", providerTokens: {} };
+    user.providerTokens = user.providerTokens || {};
+    user.providerTokens.openai = key || undefined;
+    chrome.storage.local.set({ hive_extension_user: user }, () => {
+      alert(key ? "OpenAI key saved" : "OpenAI key cleared");
+      renderUser();
+    });
+  });
+});
+
+clearOpenAI?.addEventListener("click", () => {
+  if (openAIInput) openAIInput.value = "";
+  chrome.storage.local.get(["hive_extension_user"], (i:any) => {
+    const user = i["hive_extension_user"];
+    if (!user) return alert("No user to update. Use dev button first.");
+    if (user.providerTokens) delete user.providerTokens.openai;
+    chrome.storage.local.set({ hive_extension_user: user }, () => alert("OpenAI key cleared"));
+  });
+});
+
+revokeLast?.addEventListener("click", () => {
+  chrome.storage.local.get(["hive_last_session_id"], (i:any) => {
+    const sessionId = i["hive_last_session_id"];
+    if (!sessionId) return alert("No last session recorded.");
+    chrome.runtime.sendMessage({ type: "HIVE_REVOKE_TOKEN", payload: { sessionId } }, (resp:any) => {
+      if (resp?.ok) alert("Last session revoked");
+      else alert("Revoke failed");
+    });
   });
 });
 

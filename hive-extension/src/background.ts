@@ -55,9 +55,12 @@ async function createClientSignedToken(userId: string, sessionId: string, scopes
 
 chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (resp: any) => void) => {
   if (msg?.type === "HIVE_SESSION_REQUEST") {
-    chrome.action.openPopup();
-    chrome.runtime.sendMessage({ type: "SHOW_SESSION_REQUEST", payload: msg.payload as SessionRequest });
-    sendResponse({ ok: true });
+    (async () => {
+      await new Promise((res) => chrome.storage.local.set({ hive_pending_session: msg.payload as SessionRequest }, () => res(null)));
+      chrome.action.openPopup();
+      chrome.runtime.sendMessage({ type: "SHOW_SESSION_REQUEST", payload: msg.payload as SessionRequest });
+      sendResponse({ ok: true });
+    })();
     return true;
   }
 
@@ -68,6 +71,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       if (!isAllowedOrigin(origin)) return sendResponse({ ok: false, error: "origin_not_allowed" });
       const token = await createClientSignedToken(userId, sessionId, scopes, origin);
       if (singleUse) (token as ClientSignedToken).singleUse = true;
+      await new Promise((res) => chrome.storage.local.set({ hive_last_session_id: token.sessionId }, () => res(null)));
       sendResponse({ ok: true, token });
     })();
     return true;

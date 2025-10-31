@@ -46,3 +46,9 @@
 - 21:37 Narrowed host_permissions and content_script matches in manifest.json to localhost + file URLs.
 - 21:38 Enforced allowlist checks in background for token creation and forwarding.
 - 21:39 Rebuilt extension; background updated with allowlist checks.
+- 21:41 Fixed popup race: store pending session in storage before opening popup; popup reads and clears on load.
+- 21:42 Updated contentScript to postMessage with '*' to support file:// pages; rebuild successful.
+- 21:43 Reminder: Reload extension and ensure "Allow access to file URLs" is enabled for the demo.
+- 21:45 Normalized appOrigin and postMessage targets in demo to support file:// (use '*' and 'file://').
+- 21:46 Normalized origin in contentScript for forward requests and used '*' for approved/forward responses.
+- 21:47 Rebuilt extension (contentScript + demo adjustments).

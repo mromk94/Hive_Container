@@ -1,8 +1,6 @@
 // Content script bridge for Hive Container
 // Bridges page window.postMessage <-> extension runtime messages
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const chrome: any;
 
 window.addEventListener(
   "message",
@@ -17,19 +15,20 @@ window.addEventListener(
         (resp: { ok?: boolean } | undefined) => {
           window.postMessage(
             { source: "HIVE_CONNECT_RELAYED", payload: { ok: !!(resp && resp.ok) } },
-            window.origin
+            "*"
           );
         }
       );
     }
 
     if (source === "HIVE_FORWARD_REQUEST" && payload) {
-      const origin = window.location.origin;
+      const raw = window.location.origin as string | undefined;
+      const origin = raw && raw !== "null" ? raw : "file://";
       chrome.runtime.sendMessage(
         { type: "APP_FORWARD_REQUEST", payload: { ...payload, origin } },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (resp: any) => {
-          window.postMessage({ source: "HIVE_FORWARD_RESPONSE", payload: resp }, window.origin);
+          window.postMessage({ source: "HIVE_FORWARD_RESPONSE", payload: resp }, "*");
         }
       );
     }
@@ -39,6 +38,6 @@ window.addEventListener(
 
 chrome.runtime.onMessage.addListener((msg: any) => {
   if (msg?.type === "HIVE_SESSION_APPROVED") {
-    window.postMessage({ source: "HIVE_SESSION_APPROVED", payload: msg.payload }, window.origin);
+    window.postMessage({ source: "HIVE_SESSION_APPROVED", payload: msg.payload }, "*");
   }
 });

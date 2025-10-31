@@ -53,14 +53,16 @@
       }, false);
 
       btnConnect.onclick = () => {
+        const originRaw = window.location.origin;
+        const appOrigin = originRaw && originRaw !== 'null' ? originRaw : 'file://';
         const sessionRequest = {
           sessionId: 'hive_' + Math.random().toString(36).slice(2,10),
           requestedScopes: ['persona.use'],
           requestedPersona: 'default',
-          appOrigin: window.location.origin,
+          appOrigin,
           createdAt: Date.now()
         };
-        window.postMessage({ source: 'HIVE_CONNECT_REQUEST', payload: sessionRequest }, window.origin);
+        window.postMessage({ source: 'HIVE_CONNECT_REQUEST', payload: sessionRequest }, '*');
       };
 
       btnForward.onclick = () => {
@@ -69,7 +71,7 @@
           model: 'gpt-4o-mini',
           messages: [ { role: 'user', content: 'Say hello from Hive.' } ]
         };
-        window.postMessage({ source: 'HIVE_FORWARD_REQUEST', payload: { sessionToken, requestPayload: examplePayload } }, window.origin);
+        window.postMessage({ source: 'HIVE_FORWARD_REQUEST', payload: { sessionToken, requestPayload: examplePayload } }, '*');
       };
     </script>
   </body>
