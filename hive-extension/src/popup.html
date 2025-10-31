@@ -5,11 +5,17 @@
     <title>Hive Connector</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
-      body { font-family: system-ui, sans-serif; padding:12px; width:320px; }
-      .session { border: 1px solid #ddd; padding:8px; margin-bottom:8px; border-radius:6px; }
-      .btn { padding:8px 10px; border-radius:6px; cursor:pointer; }
-      .approve { background:#0b6; color:#fff; border:none; }
-      .deny { background:#f44; color:#fff; border:none; margin-left:8px; }
+      :root { --gold: #d4af37; --bg: #0a0a0a; --panel: #111; --text: #eee; --muted:#888; --danger:#e74c3c; }
+      body { font-family: system-ui, sans-serif; padding:12px; width:320px; background: var(--bg); color: var(--text); }
+      h3,h4 { color: var(--gold); margin: 6px 0; }
+      hr { border:0; border-top:1px solid #222; margin:10px 0; }
+      .session { border: 1px solid #222; background: var(--panel); padding:8px; margin-bottom:8px; border-radius:8px; }
+      .btn { padding:8px 10px; border-radius:8px; cursor:pointer; background: transparent; color: var(--text); border:1px solid var(--gold); }
+      .btn:hover { background: rgba(212,175,55,0.1); }
+      .approve { background: var(--gold); color:#111; border-color: var(--gold); }
+      .deny { background: var(--danger); color:#fff; border-color: var(--danger); margin-left:8px; }
+      input, select { width:100%; background:#0f0f0f; border:1px solid #222; color: var(--text); padding:6px 8px; border-radius:6px; }
+      label { color: var(--muted); font-size: 12px; }
     </style>
   </head>
   <body>
@@ -22,16 +28,26 @@
     <hr/>
     <h4>Provider Settings</h4>
     <div>
-      <label for="openai-token">OpenAI API Key</label><br/>
-      <input id="openai-token" type="password" placeholder="sk-..." style="width:100%; margin:6px 0;" />
+      <label for="provider-select">Provider</label><br/>
+      <select id="provider-select" style="width:100%; margin:6px 0;">
+        <option value="openai">OpenAI</option>
+        <option value="gemini">Gemini</option>
+        <option value="claude">Claude</option>
+        <option value="local">Local</option>
+      </select>
+      <label id="provider-token-label" for="provider-token">API Key</label><br/>
+      <input id="provider-token" type="password" placeholder="Enter API key" style="width:100%; margin:6px 0;" />
       <div>
-        <button id="save-openai" class="btn">Save</button>
-        <button id="clear-openai" class="btn" style="margin-left:8px;">Clear</button>
+        <button id="save-token" class="btn">Save</button>
+        <button id="clear-token" class="btn" style="margin-left:8px;">Clear</button>
       </div>
     </div>
     <hr/>
     <h4>Controls</h4>
-    <button id="revoke-last" class="btn deny">Revoke Last Session</button>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="revoke-last" class="btn deny">Revoke Last Session</button>
+      <button id="debug-info" class="btn">Debug Info</button>
+    </div>
     <script src="popup.js"></script>
   </body>
 </html>

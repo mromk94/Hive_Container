@@ -52,3 +52,12 @@
 - 21:45 Normalized appOrigin and postMessage targets in demo to support file:// (use '*' and 'file://').
 - 21:46 Normalized origin in contentScript for forward requests and used '*' for approved/forward responses.
 - 21:47 Rebuilt extension (contentScript + demo adjustments).
+- 21:50 Added provider registry UI in popup (selector + token save/clear) and background routing via registry.
+- 21:52 Implemented Gemini forwarder in background (map OpenAI-style messages to Gemini generateContent).
+- 21:53 Updated manifest host_permissions to allow generativelanguage.googleapis.com.
+- 21:54 Rebuilt extension with Gemini support.
+- 21:56 Observation: Forward success with echo path on provider=gemini (no API key saved). Guidance: save Gemini key in popup Provider Settings, then Connect → Approve → Forward again.
+- 22:00 Added Claude forwarder (Anthropic /v1/messages) and manifest host_permissions for api.anthropic.com.
+- 22:02 Added HIVE_DEBUG_INFO endpoint in background and Debug Info button in popup.
+- 22:03 Applied black & gold styling to popup (luxury theme).
+- 22:04 Rebuilt extension; background and popup updated.

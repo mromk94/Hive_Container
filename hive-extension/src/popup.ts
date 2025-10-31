@@ -1,14 +1,18 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
+import type { ProviderId } from "./registry";
+import { getRegistry, setActiveProvider, setProviderToken } from "./registry";
 
 declare const chrome: any;
 
 const sessionList = document.getElementById("session-list")!;
 const userInfo = document.getElementById("user-info")!;
 const setSample = document.getElementById("set-sample-user")!;
-const saveOpenAI = document.getElementById("save-openai") as HTMLButtonElement | null;
-const clearOpenAI = document.getElementById("clear-openai") as HTMLButtonElement | null;
+const providerSelect = document.getElementById("provider-select") as HTMLSelectElement | null;
+const saveTokenBtn = document.getElementById("save-token") as HTMLButtonElement | null;
+const clearTokenBtn = document.getElementById("clear-token") as HTMLButtonElement | null;
 const revokeLast = document.getElementById("revoke-last") as HTMLButtonElement | null;
-const openAIInput = document.getElementById("openai-token") as HTMLInputElement | null;
+const providerTokenInput = document.getElementById("provider-token") as HTMLInputElement | null;
+const debugInfoBtn = document.getElementById("debug-info") as HTMLButtonElement | null;
 
 let pendingSession: SessionRequest | null = null;
 
@@ -21,6 +25,12 @@ function renderUser() {
       userInfo.textContent = `${user.displayName ?? user.userId}`;
     }
   });
+}
+
+async function initProviderUI() {
+  const reg = await getRegistry();
+  if (providerSelect) providerSelect.value = reg.active || "openai";
+  if (providerTokenInput) providerTokenInput.value = reg.tokens?.[reg.active as ProviderId] || "";
 }
 
 chrome.runtime.onMessage.addListener((msg: any) => {
@@ -39,6 +49,9 @@ chrome.storage.local.get(["hive_pending_session"], (items: any) => {
     chrome.storage.local.remove(["hive_pending_session"]);
   }
 });
+
+// Initialize provider UI on load
+void initProviderUI();
 
 function renderSession() {
   if (!pendingSession) {
@@ -116,27 +129,25 @@ setSample.addEventListener("click", () => {
   });
 });
 
-saveOpenAI?.addEventListener("click", () => {
-  const key = (openAIInput?.value || "").trim();
-  chrome.storage.local.get(["hive_extension_user"], (i:any) => {
-    const user = i["hive_extension_user"] || { userId: "dev_user", displayName: "Dev User", providerTokens: {} };
-    user.providerTokens = user.providerTokens || {};
-    user.providerTokens.openai = key || undefined;
-    chrome.storage.local.set({ hive_extension_user: user }, () => {
-      alert(key ? "OpenAI key saved" : "OpenAI key cleared");
-      renderUser();
-    });
-  });
+providerSelect?.addEventListener("change", async () => {
+  const active = providerSelect!.value as ProviderId;
+  await setActiveProvider(active);
+  const reg = await getRegistry();
+  if (providerTokenInput) providerTokenInput.value = reg.tokens?.[active as ProviderId] || "";
 });
 
-clearOpenAI?.addEventListener("click", () => {
-  if (openAIInput) openAIInput.value = "";
-  chrome.storage.local.get(["hive_extension_user"], (i:any) => {
-    const user = i["hive_extension_user"];
-    if (!user) return alert("No user to update. Use dev button first.");
-    if (user.providerTokens) delete user.providerTokens.openai;
-    chrome.storage.local.set({ hive_extension_user: user }, () => alert("OpenAI key cleared"));
-  });
+saveTokenBtn?.addEventListener("click", async () => {
+  const active = (providerSelect?.value || "openai") as ProviderId;
+  const key = (providerTokenInput?.value || "").trim();
+  await setProviderToken(active, key || undefined);
+  alert(key ? "Provider key saved" : "Provider key cleared");
+});
+
+clearTokenBtn?.addEventListener("click", async () => {
+  if (providerTokenInput) providerTokenInput.value = "";
+  const active = (providerSelect?.value || "openai") as ProviderId;
+  await setProviderToken(active, undefined);
+  alert("Provider key cleared");
 });
 
 revokeLast?.addEventListener("click", () => {
@@ -147,6 +158,16 @@ revokeLast?.addEventListener("click", () => {
       if (resp?.ok) alert("Last session revoked");
       else alert("Revoke failed");
     });
+  });
+});
+
+debugInfoBtn?.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "HIVE_DEBUG_INFO" }, (resp:any) => {
+    if (resp?.ok) {
+      alert(JSON.stringify(resp.debug, null, 2));
+    } else {
+      alert("Debug request failed");
+    }
   });
 });
 

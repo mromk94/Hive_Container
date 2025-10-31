@@ -18,6 +18,7 @@ Root: /Users/mac/CascadeProjects/Hive_container
     - popup.ts
     - crypto.ts
     - config.ts
+    - registry.ts
   - demo/
     - index.html
   - dist/ (built)

@@ -14,7 +14,9 @@
     "http://localhost/*",
     "http://127.0.0.1/*",
     "https://localhost/*",
-    "file://*/*"
+    "file://*/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.anthropic.com/*"
   ],
   "background": { "service_worker": "dist/background.js" },
   "action": { "default_popup": "dist/popup.html", "default_title": "Hive Container" },
