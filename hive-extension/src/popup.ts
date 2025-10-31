@@ -1,6 +1,6 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import type { ProviderId } from "./registry";
-import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel } from "./registry";
+import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken } from "./registry";
 
 declare const chrome: any;
 
@@ -16,6 +16,7 @@ const debugInfoBtn = document.getElementById("debug-info") as HTMLButtonElement 
 const providerModelInput = document.getElementById("provider-model") as HTMLInputElement | null;
 const saveModelBtn = document.getElementById("save-model") as HTMLButtonElement | null;
 const listModelsBtn = document.getElementById("list-models") as HTMLButtonElement | null;
+const secureStatus = document.getElementById("secure-status") as HTMLDivElement | null;
 
 let pendingSession: SessionRequest | null = null;
 
@@ -34,7 +35,11 @@ async function initProviderUI() {
   const reg = await getRegistry();
   if (providerSelect) providerSelect.value = reg.active || "openai";
   if (providerTokenInput) providerTokenInput.value = reg.tokens?.[reg.active as ProviderId] || "";
+  // Reflect encrypted token presence
+  const existing = await getProviderToken(reg.active as ProviderId);
+  if (secureStatus) secureStatus.textContent = existing ? "Stored securely" : "Not saved";
   if (providerModelInput) providerModelInput.value = (reg.prefModels?.[reg.active as ProviderId] || "");
+  updateTokenLabel();
 }
 
 chrome.runtime.onMessage.addListener((msg: any) => {
@@ -138,19 +143,24 @@ providerSelect?.addEventListener("change", async () => {
   await setActiveProvider(active);
   const reg = await getRegistry();
   if (providerTokenInput) providerTokenInput.value = reg.tokens?.[active as ProviderId] || "";
+  const existing = await getProviderToken(active);
+  if (secureStatus) secureStatus.textContent = existing ? "Stored securely" : "Not saved";
+  updateTokenLabel();
 });
 
 saveTokenBtn?.addEventListener("click", async () => {
   const active = (providerSelect?.value || "openai") as ProviderId;
   const key = (providerTokenInput?.value || "").trim();
   await setProviderToken(active, key || undefined);
-  alert(key ? "Provider key saved" : "Provider key cleared");
+  if (secureStatus) secureStatus.textContent = key ? "Stored securely" : "Not saved";
+  alert(key ? (active === 'local' ? "Base URL saved" : "Provider key saved") : "Provider key cleared");
 });
 
 clearTokenBtn?.addEventListener("click", async () => {
   if (providerTokenInput) providerTokenInput.value = "";
   const active = (providerSelect?.value || "openai") as ProviderId;
   await setProviderToken(active, undefined);
+  if (secureStatus) secureStatus.textContent = "Not saved";
   alert("Provider key cleared");
 });
 
@@ -198,3 +208,10 @@ debugInfoBtn?.addEventListener("click", () => {
 
 renderUser();
 renderSession();
+
+function updateTokenLabel() {
+  const active = (providerSelect?.value || "openai") as ProviderId;
+  const label = document.getElementById("provider-token-label");
+  if (!label) return;
+  label.textContent = active === 'local' ? 'Base URL' : 'API Key';
+}

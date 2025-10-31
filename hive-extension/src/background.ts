@@ -155,7 +155,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       // Provider routing via registry (fallback to echo)
       const reg = await getRegistry();
       const active = reg.active;
-      const key = reg.tokens?.[active];
+      const key = (await getProviderToken(active)) || reg.tokens?.[active];
 
       if (active === "openai" && key && requestPayload) {
         try {
@@ -170,6 +170,40 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           const json = await resp.json();
           if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
           return sendResponse({ ok: resp.ok, response: json, status: resp.status });
+        } catch (e) {
+          if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
+          return sendResponse({ ok: false, error: String(e) });
+        }
+      }
+
+      if (active === "local" && key && requestPayload) {
+        try {
+          const base = String(key).trim().replace(/\/+$/, "");
+          const endpoints = [
+            `${base}/v1/chat/completions`,
+            `${base}/chat/completions`,
+            `${base}/v1/messages`,
+            `${base}/chat`
+          ];
+          const tried: Array<{ url: string; status: number; body?: any }> = [];
+          let lastJson: any = null;
+          for (const u of endpoints) {
+            const resp = await fetch(u, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(requestPayload)
+            });
+            let json: any = null;
+            try { json = await resp.json(); } catch { json = { text: await resp.text() }; }
+            tried.push({ url: u, status: resp.status, body: json });
+            if (resp.ok) {
+              if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
+              return sendResponse({ ok: true, response: json, status: resp.status, usedUrl: u, tried });
+            }
+            lastJson = json;
+          }
+          if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
+          return sendResponse({ ok: false, response: lastJson, status: 502, tried });
         } catch (e) {
           if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
           return sendResponse({ ok: false, error: String(e) });

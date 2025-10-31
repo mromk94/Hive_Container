@@ -68,3 +68,10 @@
 - 23:15 Suppressed background error when popup not open (consume lastError) and bumped manifest version to 0.1.1.
 - 23:20 Rebuilt extension; verified successful forward with gemini-2.5-pro.
 - 23:25 Committed changes (preferred model UI, auto-discovery, demo UI, fixes) and pushed to origin/main.
+ - 23:35 Implemented Local provider forwarder (tries common endpoints, returns usedUrl/tried, honors single-use).
+ - 23:40 Encrypted provider tokens at rest (AES-GCM vault key) and routed background to use encrypted getter.
+ - 23:45 Popup UI: added secure storage indicator, dynamic token label (Local → Base URL), human-friendly copy.
+ - 23:50 Popup styling upgraded to 3D/animated luxury black & gold; hover/active depth, soft glows.
+ - 23:55 Added dev watch scripts (watch:bg/cs/popup, watch) and installed npm-run-all.
+ - 23:58 Fixed lint/structure issues: removed misplaced Local block from HIVE_LIST_MODELS; consolidated Local forwarding under APP_FORWARD_REQUEST.
+ - 00:05 Demo UX: added loading/steps animation and human-friendly response card with provider/model badges; technical details collapsed.
