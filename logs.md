@@ -61,3 +61,10 @@
 - 22:02 Added HIVE_DEBUG_INFO endpoint in background and Debug Info button in popup.
 - 22:03 Applied black & gold styling to popup (luxury theme).
 - 22:04 Rebuilt extension; background and popup updated.
+- 22:30 Added Gemini v1→v1beta fallback with detailed tried/usedUrl in background; initial 404s observed for default aliases.
+- 22:45 Implemented Preferred Model UI in popup and HIVE_LIST_MODELS endpoint; background respects preferred first.
+- 23:00 Implemented auto-discovery via ListModels and auto-cache of successful model; no manual copy needed thereafter.
+- 23:10 Styled demo to black/gold and added Forward debug panels (usedUrl, tried) for quick verification.
+- 23:15 Suppressed background error when popup not open (consume lastError) and bumped manifest version to 0.1.1.
+- 23:20 Rebuilt extension; verified successful forward with gemini-2.5-pro.
+- 23:25 Committed changes (preferred model UI, auto-discovery, demo UI, fixes) and pushed to origin/main.
