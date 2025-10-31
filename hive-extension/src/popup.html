@@ -10,7 +10,7 @@
       h3 { color: var(--gold); margin: 4px 0 10px; letter-spacing: .3px; text-shadow: 0 0 18px rgba(212,175,55,.15); }
       h4 { color: var(--gold); margin: 8px 0 6px; font-weight: 600; }
       hr { border:0; border-top:1px solid #1a1a1a; margin:10px 0; }
-      .session { border: 1px solid var(--outline); background: linear-gradient(180deg, #111, #0c0c0c); padding:10px; margin-bottom:10px; border-radius:10px; box-shadow: 0 12px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03); transform: translateZ(0); transition: transform .2s ease, box-shadow .2s ease; }
+      .session { border: 1px solid var(--outline); background: linear-gradient(180deg, #111, #0c0c0c); padding:10px; margin-bottom:10px; border-radius:10px; box-shadow: 0 12px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03); transform: translateZ(0); transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
       .session:hover { transform: translateY(-2px); box-shadow: 0 16px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(212,175,55,.1) inset; }
       .btn { padding:8px 10px; border-radius:10px; cursor:pointer; background: linear-gradient(180deg, rgba(212,175,55,.18), rgba(212,175,55,.08)); color: var(--text); border:1px solid var(--gold); transition: transform .12s ease, box-shadow .12s ease, background .2s ease; box-shadow: 0 8px 18px rgba(212,175,55,.12); }
       .btn:hover { background: linear-gradient(180deg, rgba(212,175,55,.25), rgba(212,175,55,.12)); transform: translateY(-1px); box-shadow: 0 10px 22px rgba(212,175,55,.18); }
@@ -22,15 +22,69 @@
       input:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(212,175,55,.12); }
       label { color: var(--muted); font-size: 12px; }
       .row { background: linear-gradient(180deg, #121212, #0f0f0f); border:1px solid var(--outline); border-radius:12px; padding:10px; margin:10px 0; box-shadow: 0 12px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03); }
+      textarea { width:100%; background:#0d0d0d; border:1px solid #1c1c1c; color: var(--text); padding:8px 10px; border-radius:8px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; min-height: 56px; resize: vertical; }
+      textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(212,175,55,.12); }
+      .value { font-size:12px; color: var(--muted); margin-left:6px; }
+      .tabs { display:flex; gap:8px; margin-bottom:8px; }
+      .tabbtn { flex:1; padding:8px; border-radius:10px; border:1px solid var(--outline); background:#121212; color:var(--text); cursor:pointer; }
+      .tabbtn.active { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(212,175,55,.15) inset; }
+      .chat-log { height: 260px; overflow:auto; border:1px solid var(--outline); border-radius:10px; padding:8px; background: linear-gradient(180deg, #131313, #0f0f0f); }
+      .msg { margin:8px 0; }
+      .msg .who { font-size:11px; color: var(--muted); }
+      .msg .bubble { margin-top:2px; padding:8px; border-radius:10px; border:1px solid var(--outline); background:#0f0f0f; }
     </style>
   </head>
   <body>
+    <div class="tabs">
+      <button id="tabbtn-chat" class="tabbtn active">Chat</button>
+      <button id="tabbtn-config" class="tabbtn">Config</button>
+    </div>
+    <div id="tab-chat">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <h3>Hive Chat</h3>
+        <div class="value">Context: <span id="ctx-size">0</span></div>
+      </div>
+      <div id="chat-approval" class="row" style="display:none;">
+        <!-- approval banner content injected by popup.ts -->
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <input id="chat-input" type="text" placeholder="Ask your AI..." />
+        <button id="chat-send" class="btn">Send</button>
+      </div>
+    </div>
+    <div id="tab-config" style="display:none;">
     <h3>Hive Connector</h3>
     <div id="session-list">No session requests</div>
     <hr/>
     <h4>User</h4>
     <div id="user-info">Not set</div>
     <button id="set-sample-user">Set sample user (dev)</button>
+    <hr/>
+    <h4>Persona</h4>
+    <div>
+      <label for="persona-name">Name</label><br/>
+      <input id="persona-name" type="text" placeholder="My Hive" style="width:100%; margin:6px 0;" />
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+        <div style="flex:1;">
+          <label for="persona-formality">Formality</label><span class="value" id="val-formality">50</span>
+          <input id="persona-formality" type="range" min="0" max="100" value="50" />
+        </div>
+        <div style="flex:1;">
+          <label for="persona-concision">Concision</label><span class="value" id="val-concision">50</span>
+          <input id="persona-concision" type="range" min="0" max="100" value="50" />
+        </div>
+      </div>
+      <label for="persona-keywords" style="margin-top:6px; display:block;">Voice keywords (comma-separated)</label>
+      <textarea id="persona-keywords" placeholder="e.g. warm, direct, optimistic"></textarea>
+      <label for="persona-bio" style="margin-top:6px; display:block;">Short bio</label>
+      <textarea id="persona-bio" placeholder="Tell Hive how to introduce itself"></textarea>
+      <label for="persona-rules" style="margin-top:6px; display:block;">Do / Don’t</label>
+      <textarea id="persona-rules" placeholder="e.g. Do be concise. Don’t reveal secrets."></textarea>
+      <div style="margin-top:8px;">
+        <button id="save-persona" class="btn">Save Persona</button>
+      </div>
+    </div>
     <hr/>
     <h4>Choose AI Service</h4>
     <div>
@@ -39,6 +93,8 @@
         <option value="openai">OpenAI</option>
         <option value="gemini">Gemini</option>
         <option value="claude">Claude</option>
+        <option value="grok">Grok (base URL)</option>
+        <option value="deepseek">DeepSeek</option>
         <option value="local">Local</option>
       </select>
       <label id="provider-token-label" for="provider-token">API Key</label><br/>
@@ -55,11 +111,23 @@
         <button id="list-models" class="btn" style="margin-left:8px;">List Models</button>
       </div>
     </div>
+    <div class="row">
+      <h4>Sign in (optional)</h4>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        <button id="oauth-openai" class="btn">OpenAI</button>
+        <button id="oauth-gemini" class="btn">Gemini</button>
+        <button id="oauth-claude" class="btn">Claude</button>
+        <button id="oauth-grok" class="btn">Grok</button>
+        <button id="oauth-deepseek" class="btn">DeepSeek</button>
+      </div>
+      <div class="value" style="margin-top:6px;">Uses provider login pages for now. API Keys still work.</div>
+    </div>
     <hr/>
     <h4>Controls</h4>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button id="revoke-last" class="btn deny">Revoke Last Session</button>
       <button id="debug-info" class="btn">Debug Info</button>
+    </div>
     </div>
     <script src="popup.js"></script>
   </body>

@@ -24,6 +24,24 @@
       .steps { font-size:13px; color: var(--muted); }
       details { border:1px solid var(--outline); border-radius:10px; padding:10px; background:#0f0f0f; }
       summary { cursor:pointer; color: var(--gold); }
+      .token-card { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+      .kv { display:flex; flex-direction: column; background:rgba(255,255,255,0.02); border:1px solid var(--outline); border-radius:10px; padding:8px; }
+      .k { font-size:11px; color: var(--muted); }
+      .v { margin-top:2px; font-weight:600; word-break: break-word; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      /* Inline prologue inside card */
+      .prologue { position: relative; display:none; margin: 8px 0 10px; }
+      .prologue.active { display:block; }
+      .pro-panel { position: relative; padding: 14px 16px; border-radius: 12px; background: linear-gradient(180deg, #141414, #0f0f0f); border:1px solid var(--outline); box-shadow: 0 14px 26px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04); }
+      .pro-panel .lead { color: var(--gold); font-weight: 600; margin-bottom: 6px; text-shadow: 0 0 14px rgba(212,175,55,.2); }
+      #prologueTextInline { font-size: 15px; line-height: 1.6; min-height: 28px; }
+      .pro-particles { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .particle { position:absolute; width:3px; height:3px; border-radius:50%; background: rgba(212,175,55,.5); animation: floatUp 4s linear infinite; filter: blur(.3px); }
+      @keyframes floatUp { from { transform: translateY(10vh); opacity:.0; } 10%{opacity:.5;} to { transform: translateY(-20vh); opacity:0; } }
+      /* Suggestions */
+      .chips { display:flex; flex-direction: column; gap:8px; margin-top:8px; }
+      .sugg { background:#0f0f0f; border:1px solid var(--outline); border-radius:10px; padding:10px; }
+      .sugg .actions { display:flex; gap:8px; margin-top:6px; }
     </style>
   </head>
   <body>
@@ -32,7 +50,7 @@
       <button id="btn-connect">Connect Hive</button>
       <button id="btn-forward" disabled>Forward Example Request</button>
     </div>
-    <div class="row"><strong>Status:</strong> <span id="status">Idle</span></div>
+    <div class="row" style="display:flex; align-items:center; gap:12px;"><strong>Status:</strong> <span id="status">Idle</span></div>
     <div id="loading" class="card loading" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
       <div>
@@ -42,7 +60,15 @@
     </div>
     <div class="row">
       <strong>Token:</strong>
-      <pre id="token">(none)</pre>
+      <div id="token-card" class="card token-card" style="margin-top:8px;">(none)</div>
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="btn-copy-token">Copy token JSON</button>
+        <button id="btn-toggle-mask">Reveal</button>
+      </div>
+      <details style="margin-top:8px;">
+        <summary>Show token JSON</summary>
+        <pre id="token-json">(none)</pre>
+      </details>
     </div>
     <div class="row"><strong>Forward Response:</strong></div>
     <div class="card" id="human-card">
@@ -52,8 +78,19 @@
         <span class="badge" id="badge-status">-</span>
         <span class="badge" id="badge-model">-</span>
       </div>
+      <div class="prologue" id="prologue">
+        <div class="pro-panel">
+          <div class="lead">From the Hive...</div>
+          <div id="prologueTextInline"></div>
+          <div class="pro-particles" id="pro-particles"></div>
+        </div>
+      </div>
       <div class="label">Answer</div>
-      <div id="human" style="margin-top:6px; line-height:1.5;">(none)</div>
+      <div id="human" style="margin-top:6px; line-height:1.6;">(none)</div>
+      <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+        <button id="btn-suggest" disabled>Suggest Replies</button>
+      </div>
+      <div id="suggestions" class="chips" aria-live="polite" aria-label="Reply suggestions" style="display:none;"></div>
     </div>
     <div class="row">
       <details>
@@ -74,7 +111,8 @@
     </div>
     <script>
       const statusEl = document.getElementById('status');
-      const tokenEl = document.getElementById('token');
+      const tokenCard = document.getElementById('token-card');
+      const tokenJsonEl = document.getElementById('token-json');
       const respEl = document.getElementById('response');
       const usedUrlEl = document.getElementById('usedUrl');
       const triedEl = document.getElementById('tried');
@@ -86,8 +124,23 @@
       const badgeProvider = document.getElementById('badge-provider');
       const badgeStatus = document.getElementById('badge-status');
       const badgeModel = document.getElementById('badge-model');
+      const copyTokenBtn = document.getElementById('btn-copy-token');
+      const toggleMaskBtn = document.getElementById('btn-toggle-mask');
+      let maskSecret = true;
+      const prologueEl = document.getElementById('prologue');
+      const prologueTextEl = document.getElementById('prologueTextInline');
+      const particlesEl = document.getElementById('pro-particles');
 
       let sessionToken = null;
+
+      function buildSystemFromPersona(p){
+        if (!p) return 'You are Hive, a helpful AI that adapts to the user\'s preferred tone. Be friendly and clear.';
+        const kws = (p.keywords || '').split(',').map(s=>s.trim()).filter(Boolean).slice(0,5).join(', ');
+        const style = `Tone formality ${p.tone?.formality ?? 50}/100, concision ${p.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}.`;
+        const rules = p.rules ? `Guidelines: ${p.rules}` : '';
+        const bio = p.bio ? `About you: ${p.bio}` : '';
+        return `You are ${p.name || 'Hive'}, the user\'s personal AI. Speak in a way that feels natural to them. ${style} ${rules} ${bio}`.trim();
+      }
 
       window.addEventListener('message', (evt) => {
         const data = evt.data || {};
@@ -96,9 +149,11 @@
         }
         if (data.source === 'HIVE_SESSION_APPROVED') {
           sessionToken = data.payload && data.payload.token;
-          tokenEl.textContent = JSON.stringify(sessionToken, null, 2);
+          tokenJsonEl.textContent = JSON.stringify(sessionToken, null, 2);
+          renderToken(sessionToken);
           statusEl.textContent = 'Session approved';
           btnForward.disabled = !sessionToken;
+          const btnS = document.getElementById('btn-suggest'); if (btnS) btnS.disabled = !sessionToken;
         }
         if (data.source === 'HIVE_FORWARD_RESPONSE') {
           loading.classList.remove('active');
@@ -110,6 +165,26 @@
           statusEl.textContent = ok ? 'Forward success' : 'Forward error';
           renderHuman(p);
           btnForward.disabled = false;
+        }
+
+        if (data.source === 'HIVE_SUGGESTIONS') {
+          const box = document.getElementById('suggestions');
+          if (!box) return;
+          const payload = data.payload || {};
+          const list = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+          if (!list.length) { box.style.display='none'; box.innerHTML=''; return; }
+          box.style.display='block';
+          box.innerHTML = '';
+          list.forEach((s)=>{
+            const el = document.createElement('div'); el.className = 'sugg';
+            const txt = document.createElement('div'); txt.textContent = s;
+            const actions = document.createElement('div'); actions.className = 'actions';
+            const copy = document.createElement('button'); copy.textContent = 'Copy';
+            copy.onclick = async ()=>{ try { await navigator.clipboard.writeText(s); copy.textContent='Copied'; setTimeout(()=>copy.textContent='Copy', 900);} catch{} };
+            actions.appendChild(copy);
+            el.appendChild(txt); el.appendChild(actions);
+            box.appendChild(el);
+          });
         }
       }, false);
 
@@ -123,14 +198,62 @@
           appOrigin,
           createdAt: Date.now()
         };
+
+      const btnSuggest = document.getElementById('btn-suggest');
+      btnSuggest?.addEventListener('click', async ()=>{
+        if (!sessionToken) return;
+        const thread = [
+          { role: 'user', content: 'Say hello from Hive.' }
+        ];
+        const payload = { sessionToken, thread, max_suggestions: 3 };
+        const box = document.getElementById('suggestions'); if (box){ box.style.display='block'; box.innerHTML = '<div class="sugg">Loading suggestions…</div>'; }
+        window.postMessage({ source: 'HIVE_SUGGEST_REPLY', payload }, '*');
+      });
         window.postMessage({ source: 'HIVE_CONNECT_REQUEST', payload: sessionRequest }, '*');
       };
 
-      btnForward.onclick = () => {
+      function renderToken(t){
+        if (!t) { tokenCard.textContent = '(none)'; return; }
+        const fmt = (ts)=> ts ? new Date(ts*1000).toLocaleString() : '—';
+        const sig = typeof t.signature === 'string' ? t.signature : '';
+        const sigMasked = sig ? (maskSecret ? (sig.slice(0,8) + '…' + sig.slice(-6)) : sig) : '—';
+        const scopes = Array.isArray(t.scopes) ? t.scopes.join(', ') : '—';
+        const singleUse = t.singleUse ? 'Yes' : 'No';
+        tokenCard.innerHTML = `
+          <div class="kv"><div class="k">Session ID</div><div class="v mono">${t.sessionId || '—'}</div></div>
+          <div class="kv"><div class="k">User</div><div class="v">${t.sub || '—'}</div></div>
+          <div class="kv"><div class="k">Scopes</div><div class="v">${scopes}</div></div>
+          <div class="kv"><div class="k">Origin</div><div class="v mono">${t.origin || '—'}</div></div>
+          <div class="kv"><div class="k">Issued</div><div class="v">${fmt(t.iat)}</div></div>
+          <div class="kv"><div class="k">Expires</div><div class="v">${fmt(t.exp)}</div></div>
+          <div class="kv" style="grid-column: 1 / span 2;"><div class="k">Signature</div><div class="v mono">${sigMasked}</div></div>
+          <div class="kv"><div class="k">Single-use</div><div class="v">${singleUse}</div></div>
+        `;
+        toggleMaskBtn.textContent = maskSecret ? 'Reveal' : 'Mask';
+      }
+
+      copyTokenBtn?.addEventListener('click', async ()=>{
+        if (!sessionToken) return alert('No token');
+        await navigator.clipboard.writeText(JSON.stringify(sessionToken, null, 2));
+        copyTokenBtn.textContent = 'Copied!';
+        setTimeout(()=> copyTokenBtn.textContent = 'Copy token JSON', 1200);
+      });
+
+      toggleMaskBtn?.addEventListener('click', ()=>{
+        maskSecret = !maskSecret;
+        renderToken(sessionToken);
+      });
+
+      btnForward.onclick = async () => {
         if (!sessionToken) { alert('No token yet'); return; }
+        const persona = await getPersona();
+        const sys = buildSystemFromPersona(persona);
         const examplePayload = {
           model: 'gpt-4o-mini',
-          messages: [ { role: 'user', content: 'Say hello from Hive.' } ]
+          messages: [
+            { role: 'system', content: sys },
+            { role: 'user', content: 'Say hello from Hive.' }
+          ]
         };
         btnForward.disabled = true;
         loading.classList.add('active');
@@ -141,16 +264,115 @@
         window.postMessage({ source: 'HIVE_FORWARD_REQUEST', payload: { sessionToken, requestPayload: examplePayload } }, '*');
       };
 
-      function renderHuman(payload) {
+      async function renderHuman(payload) {
         const provider = inferProvider(payload.usedUrl);
         const model = inferModel(payload.response);
         const text = extractText(payload.response);
-        human.textContent = text || '(no text)';
+        const prologueLine = extractPrologue(text);
+        const persona = await getPersona();
+        const toneF = (persona && persona.tone && typeof persona.tone.formality === 'number') ? persona.tone.formality : 50;
+        const toneC = (persona && persona.tone && typeof persona.tone.concision === 'number') ? persona.tone.concision : 50;
+        const opts = {
+          intensityAdj: Math.round((100 - toneF)/5), // more informal => more particles
+          speedAdj: Math.round((toneC - 50)/5)       // more concise => faster typing
+        };
+        playCinematic(prologueLine, text, ()=>{
+          human.innerHTML = renderMarkdown(text || '(no text)');
+          humanCardFade(1);
+        }, opts);
         badgeProvider.textContent = provider || '-';
         badgeStatus.textContent = payload.ok ? 'OK' : 'Error';
         badgeStatus.style.borderColor = payload.ok ? 'var(--gold)' : '#e74c3c';
         badgeStatus.style.color = payload.ok ? 'var(--gold)' : '#ff8a8a';
         badgeModel.textContent = model || 'model: unknown';
+      }
+
+      function extractPrologue(text){
+        if (!text) return 'Connecting to the Hive...';
+        const m = text.match(/^[^\n.!?]{10,}[.!?]/);
+        if (m) return m[0];
+        const line = text.split(/\r?\n/)[0];
+        return line && line.length > 8 ? line : 'A low hum of processing, a buzz of data streams connecting...';
+      }
+
+      function humanCardFade(op){
+        const card = document.getElementById('human-card');
+        if (!card) return;
+        card.style.transition = 'opacity .25s ease';
+        card.style.opacity = String(op);
+      }
+
+      function playCinematic(prologueLine, fullText, done, opts){
+        if (!prologueEl || !prologueTextEl || !particlesEl){ done(); return; }
+        try {
+          // Prepare inside the card (show immediately as fallback)
+          prologueEl.classList.add('active');
+          prologueTextEl.textContent = prologueLine || 'Connecting to the Hive...';
+          particlesEl.innerHTML = '';
+          humanCardFade(0.15);
+          // Intensity deduced from punctuation + persona adjustment
+          const intensityBase = Math.max(20, (fullText && fullText.match(/[!]/g)||[]).length*6 + (fullText && fullText.match(/[.]{3}/g)||[]).length*10 + 20);
+          const intensity = Math.min(60, intensityBase + (opts && opts.intensityAdj ? opts.intensityAdj : 0));
+          spawnParticles(intensity);
+          // Typewriter (slower, with floor)
+          const base = 28 - Math.min(10, Math.floor(intensity/10));
+          const speed = Math.max(24, base - (opts && opts.speedAdj ? (opts.speedAdj) : 0));
+          typewrite(prologueTextEl, prologueLine || 'Connecting to the Hive...', speed, () => {
+            setTimeout(()=>{
+              prologueEl.classList.remove('active');
+              done();
+            }, 1200);
+          });
+        } catch (_) {
+          // Fallback: show text without animation
+          prologueEl.classList.add('active');
+          prologueTextEl.textContent = prologueLine || 'Connecting to the Hive...';
+          setTimeout(()=>{ prologueEl.classList.remove('active'); done(); }, 1200);
+        }
+      }
+
+      function getPersona(){
+        return new Promise((resolve)=>{
+          const onMsg = (evt)=>{
+            const d = evt && evt.data;
+            if (d && d.source === 'HIVE_PERSONA'){
+              window.removeEventListener('message', onMsg);
+              resolve((d.payload && d.payload.persona) || null);
+            }
+          };
+          window.addEventListener('message', onMsg, false);
+          window.postMessage({ source: 'HIVE_GET_PERSONA' }, '*');
+          setTimeout(()=>{ window.removeEventListener('message', onMsg); resolve(null); }, 1200);
+        });
+      }
+
+      function spawnParticles(n){
+        const w = Math.max(40, particlesEl?.clientWidth || 0);
+        for (let i=0;i<n;i++){
+          const dot = document.createElement('div');
+          dot.className = 'particle';
+          const x = Math.random()*w;
+          const d = 2 + Math.random()*4;
+          const s = 3 + Math.random()*3;
+          dot.style.left = x+'px';
+          dot.style.bottom = (-Math.random()*24 - 8)+'px';
+          dot.style.width = d+'px';
+          dot.style.height = d+'px';
+          dot.style.animationDuration = s+'s';
+          particlesEl.appendChild(dot);
+        }
+      }
+
+      function typewrite(el, text, baseDelay, cb){
+        let i=0; const tick=()=>{
+          if (i>text.length){ cb(); return; }
+          el.textContent = text.slice(0,i);
+          i++;
+          const ch = text[i-1];
+          const jitter = Math.random()*10;
+          const pause = ch === '.' || ch === ',' ? 140 : ch==='…' ? 180 : 0;
+          setTimeout(tick, Math.max(16, baseDelay) + jitter + pause);
+        }; tick();
       }
 
       function inferProvider(url) {
@@ -186,6 +408,50 @@
           if (resp.choices && resp.choices[0] && resp.choices[0].message) return resp.choices[0].message.content || '';
           return '';
         } catch { return ''; }
+      }
+
+      function escapeHtml(s){
+        return String(s).replace(/[&<>"']/g, (ch)=>({
+          "&":"&amp;",
+          "<":"&lt;",
+          ">":"&gt;",
+          "\"":"&quot;",
+          "'":"&#39;"
+        }[ch] || ""));
+      }
+
+      function mdInline(s){
+        // basic inline formatting on already escaped text
+        // bold **text**
+        s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        // italics *text* (avoid list bullets by requiring non-space inside)
+        s = s.replace(/\*(\S[^*]*?)\*/g, '<em>$1</em>');
+        s = s.replace(/_(\S[^_]*?)_/g, '<em>$1</em>');
+        return s;
+      }
+
+      function renderMarkdown(src){
+        if (!src) return '';
+        const escaped = escapeHtml(src);
+        const lines = escaped.split(/\r?\n/);
+        let html = '';
+        let inList = false;
+        const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+        for (let line of lines){
+          if (/^\s*[\*\-]\s+/.test(line)){
+            if (!inList){ html += '<ul style="margin:6px 0 0 16px;">'; inList = true; }
+            const item = line.replace(/^\s*[\*\-]\s+/, '');
+            html += '<li>' + mdInline(item) + '</li>';
+          } else if (line.trim() === ''){
+            closeList();
+            html += '<div style="height:6px;"></div>';
+          } else {
+            closeList();
+            html += '<p style="margin:6px 0;">' + mdInline(line) + '</p>';
+          }
+        }
+        closeList();
+        return html;
       }
     </script>
   </body>

@@ -86,3 +86,12 @@
    3) Generic Chat Adapter v1: floating “Ask My Hive” near textareas, suggestion panel.
    4) Shared memory per session/origin; inject into provider prompts.
    5) Privacy controls (allow/deny + quick toggle UI).
+ - 00:18 Demo fix: removed TS-style "as" cast from escapeHtml to resolve `Unexpected identifier 'as'`; added safe mini-markdown renderer and upgraded token UI to 3D card with mask/copy.
+
+- 13:30 Demo: Added inline cinematic prologue with persona-aware typewriter + particles. Later hardened fallback and slowed speed.
+- 13:45 Handshake v1: Implemented HIVE_SUGGEST_REPLY in background, bridged via contentScript; Demo added Suggest Replies UI.
+- 14:05 Performance: Added fetch timeouts, reduced tokens, raced endpoints (Gemini v1/v1beta; Local endpoints) for faster suggestions.
+- 14:20 Diagnostics: Content script surfaces runtime.lastError back to page to avoid silent hangs.
+- 14:35 Popup UX: Introduced 2-tab layout — Chat (default) and Config (existing settings). Chat panel streams via HIVE_POPUP_CHAT.
+- 14:36 Background: Added HIVE_POPUP_CHAT (provider-backed chat with persona system) and HIVE_UPDATE_CONTEXT (rolling events per origin/session).
+- 14:38 Popup: Wired tab switching and minimal chat send; messages render in chat log.

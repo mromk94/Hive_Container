@@ -9,13 +9,16 @@ Carry your AI persona across the web with explicit consent, client-side cryptogr
 - Scoped forwarding to providers (OpenAI example) with encrypted token storage (MVP in local storage)
 - Revocation and single-use enforcement
 - Content bridge (page <-> extension) and demo page for E2E testing
+- Popup with two tabs:
+  - Chat: portable, provider-backed chat interface (OpenAI/Gemini/Claude/Local) conditioned by your Persona.
+  - Config: provider selection, API key/base URL, preferred model, persona editor, and controls.
 
 ## Project Structure
 - manifest.json
 - src/
   - background.ts — message routing, token creation, forwarder, enforcement
   - contentScript.ts — page bridge using window.postMessage
-  - popup.html/.ts — consent UI and approve/deny
+  - popup.html/.ts — two-tab UI (Chat + Config), consent UI, approve/deny
   - types.ts — canonical contracts
   - crypto.ts — ES256 WebCrypto key mgmt + signing
   - config.ts — origin allowlist (dev)
@@ -42,12 +45,23 @@ Carry your AI persona across the web with explicit consent, client-side cryptogr
 - Click “Forward Example Request”
 - With a placeholder/invalid provider token, expect an error JSON (verifies forwarding path)
 - Without provider token, the extension responds with an echo fallback
+  
+### Suggestions (Handshake v1)
+- In the demo page, click “Suggest Replies” to request persona-aware quick suggestions (`HIVE_SUGGEST_REPLY`).
+  
+### Context Updates
+- Background accepts `HIVE_UPDATE_CONTEXT` to append events to a rolling per-origin/session store.
 
 ## Messaging Contracts
 - Page → Content: `window.postMessage`
 - Content ↔ Background: `chrome.runtime.sendMessage`
 - Background ↔ Popup: `chrome.runtime.sendMessage` and `chrome.action.openPopup`
-- Key message types: `HIVE_SESSION_REQUEST`, `SHOW_SESSION_REQUEST`, `HIVE_CREATE_TOKEN`, `APP_FORWARD_REQUEST`, `HIVE_SESSION_APPROVED`, `HIVE_FORWARD_RESPONSE`
+- Key message types: `HIVE_SESSION_REQUEST`, `SHOW_SESSION_REQUEST`, `HIVE_CREATE_TOKEN`, `APP_FORWARD_REQUEST`, `HIVE_SESSION_APPROVED`, `HIVE_FORWARD_RESPONSE`, `HIVE_SUGGEST_REPLY`, `HIVE_UPDATE_CONTEXT`, `HIVE_POPUP_CHAT`
+
+### Popup Chat Flow
+- Popup (Chat tab) sends `HIVE_POPUP_CHAT` with a short message list.
+- Background routes to the active provider and injects a Persona-derived system prompt.
+- Response text is returned and rendered in the Chat log.
 
 ## Security
 - ES256 signing of canonical payload: `sub|sessionId|scopes|iat|exp|origin`

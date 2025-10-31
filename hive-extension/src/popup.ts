@@ -1,12 +1,22 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import type { ProviderId } from "./registry";
-import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken } from "./registry";
+import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile } from "./registry";
 
 declare const chrome: any;
 
 const sessionList = document.getElementById("session-list")!;
 const userInfo = document.getElementById("user-info")!;
 const setSample = document.getElementById("set-sample-user")!;
+// Tabs & Chat UI
+const tabChatBtn = document.getElementById("tabbtn-chat") as HTMLButtonElement | null;
+const tabConfigBtn = document.getElementById("tabbtn-config") as HTMLButtonElement | null;
+const tabChat = document.getElementById("tab-chat") as HTMLDivElement | null;
+const tabConfig = document.getElementById("tab-config") as HTMLDivElement | null;
+const chatLog = document.getElementById("chat-log") as HTMLDivElement | null;
+const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
+const chatSend = document.getElementById("chat-send") as HTMLButtonElement | null;
+const chatApproval = document.getElementById("chat-approval") as HTMLDivElement | null;
+const ctxSizeEl = document.getElementById('ctx-size') as HTMLSpanElement | null;
 const providerSelect = document.getElementById("provider-select") as HTMLSelectElement | null;
 const saveTokenBtn = document.getElementById("save-token") as HTMLButtonElement | null;
 const clearTokenBtn = document.getElementById("clear-token") as HTMLButtonElement | null;
@@ -17,8 +27,158 @@ const providerModelInput = document.getElementById("provider-model") as HTMLInpu
 const saveModelBtn = document.getElementById("save-model") as HTMLButtonElement | null;
 const listModelsBtn = document.getElementById("list-models") as HTMLButtonElement | null;
 const secureStatus = document.getElementById("secure-status") as HTMLDivElement | null;
+// OAuth buttons
+const oauthOpenAI = document.getElementById('oauth-openai') as HTMLButtonElement | null;
+const oauthGemini = document.getElementById('oauth-gemini') as HTMLButtonElement | null;
+const oauthClaude = document.getElementById('oauth-claude') as HTMLButtonElement | null;
+const oauthGrok = document.getElementById('oauth-grok') as HTMLButtonElement | null;
+const oauthDeepseek = document.getElementById('oauth-deepseek') as HTMLButtonElement | null;
+// Persona UI elements
+const personaName = document.getElementById("persona-name") as HTMLInputElement | null;
+const personaFormality = document.getElementById("persona-formality") as HTMLInputElement | null;
+const personaConcision = document.getElementById("persona-concision") as HTMLInputElement | null;
+const personaKeywords = document.getElementById("persona-keywords") as HTMLTextAreaElement | null;
+const personaBio = document.getElementById("persona-bio") as HTMLTextAreaElement | null;
+const personaRules = document.getElementById("persona-rules") as HTMLTextAreaElement | null;
+const valFormality = document.getElementById("val-formality") as HTMLSpanElement | null;
+const valConcision = document.getElementById("val-concision") as HTMLSpanElement | null;
+const savePersonaBtn = document.getElementById("save-persona") as HTMLButtonElement | null;
 
 let pendingSession: SessionRequest | null = null;
+
+type ChatMessage = { role: 'user'|'assistant'|'system'; content: string };
+const chatMessages: ChatMessage[] = [];
+
+function renderChat() {
+  if (!chatLog) return;
+  chatLog.innerHTML = "";
+  for (const m of chatMessages) {
+    const row = document.createElement('div'); row.className = 'msg';
+    const who = document.createElement('div'); who.className = 'who'; who.textContent = m.role === 'assistant' ? 'Hive' : (m.role === 'user' ? 'You' : 'System');
+    const bub = document.createElement('div'); bub.className = 'bubble'; bub.textContent = m.content;
+    row.appendChild(who); row.appendChild(bub);
+    chatLog.appendChild(row);
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function renderChatApproval(){
+  if (!chatApproval) return;
+  if (!pendingSession){ chatApproval.style.display='none'; chatApproval.innerHTML=''; return; }
+  chatApproval.style.display='block';
+  const s = pendingSession;
+  chatApproval.innerHTML = `
+    <div>
+      <div style="font-weight:600; color: var(--gold);">Connect Hive?</div>
+      <div style="font-size:12px; color: var(--muted); margin-top:4px;">
+        <div><strong>App:</strong> ${s.appOrigin || 'unknown'}</div>
+        <div><strong>Persona:</strong> ${s.requestedPersona || 'default'}</div>
+        <div><strong>Scopes:</strong> ${s.requestedScopes.join(', ')}</div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="approve-in-chat" class="btn approve">Approve</button>
+        <button id="deny-in-chat" class="btn deny">Deny</button>
+        <button id="customize-in-chat" class="btn">Customize</button>
+      </div>
+    </div>
+  `;
+  const approveBtn = document.getElementById('approve-in-chat') as HTMLButtonElement | null;
+  const denyBtn = document.getElementById('deny-in-chat') as HTMLButtonElement | null;
+  const customizeBtn = document.getElementById('customize-in-chat') as HTMLButtonElement | null;
+  approveBtn?.addEventListener('click', async ()=>{ await approveSession(); renderChatApproval(); });
+  denyBtn?.addEventListener('click', ()=>{
+    pendingSession = null;
+    chrome.storage.local.remove(["hive_pending_session"]);
+    renderSession();
+    renderChatApproval();
+  });
+  customizeBtn?.addEventListener('click', ()=>{ switchTab('config'); });
+}
+
+function switchTab(which: 'chat'|'config'){
+  if (!tabChat || !tabConfig || !tabChatBtn || !tabConfigBtn) return;
+  if (which === 'chat'){
+    tabChat.style.display = '';
+    tabConfig.style.display = 'none';
+    tabChatBtn.classList.add('active');
+    tabConfigBtn.classList.remove('active');
+  } else {
+    tabChat.style.display = 'none';
+    tabConfig.style.display = '';
+    tabChatBtn.classList.remove('active');
+    tabConfigBtn.classList.add('active');
+  }
+}
+
+async function tryHandleIntent(q: string): Promise<boolean> {
+  const text = q.trim();
+  const lower = text.toLowerCase();
+  const p = await getPersonaProfile();
+  let changed = false;
+
+  // set tone/formality to N or set tone to casual/formal [N]
+  let m = lower.match(/set\s+(tone|formality)\s+to\s+(\d{1,3})/);
+  if (m) {
+    const val = Math.max(0, Math.min(100, parseInt(m[2], 10)));
+    p.tone = p.tone || { formality: 50, concision: 50 } as any;
+    (p.tone as any).formality = val;
+    changed = true;
+  } else if ((m = lower.match(/set\s+tone\s+to\s+(casual|formal)(?:\s+(\d{1,3}))?/))) {
+    const kind = m[1];
+    const val = m[2] ? Math.max(0, Math.min(100, parseInt(m[2], 10))) : (kind === 'casual' ? 30 : 70);
+    p.tone = p.tone || { formality: 50, concision: 50 } as any;
+    (p.tone as any).formality = val;
+    changed = true;
+  }
+
+  // set concision to N
+  m = lower.match(/set\s+concision\s+to\s+(\d{1,3})/);
+  if (m) {
+    const val = Math.max(0, Math.min(100, parseInt(m[1], 10)));
+    p.tone = p.tone || { formality: 50, concision: 50 } as any;
+    (p.tone as any).concision = val;
+    changed = true;
+  }
+
+  // add keyword(s): list
+  m = lower.match(/add\s+keywords?:\s+(.+)/);
+  if (m) {
+    const add = m[1].split(',').map(s=>s.trim()).filter(Boolean);
+    const cur = (p.keywords || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const set = Array.from(new Set(cur.concat(add)));
+    p.keywords = set.join(', ');
+    changed = true;
+  }
+
+  // set keywords: list
+  m = lower.match(/set\s+keywords?:\s+(.+)/);
+  if (m) {
+    const list = m[1].split(',').map(s=>s.trim()).filter(Boolean);
+    p.keywords = list.join(', ');
+    changed = true;
+  }
+
+  // set bio: text
+  m = lower.match(/set\s+bio:\s+(.+)/);
+  if (m) {
+    p.bio = text.slice(text.toLowerCase().indexOf('set bio:') + 'set bio:'.length).trim();
+    changed = true;
+  }
+
+  // set rules: text
+  m = lower.match(/set\s+rules?:\s+(.+)/);
+  if (m) {
+    p.rules = text.slice(text.toLowerCase().indexOf('set rule') + (lower.includes('rules:')?'set rules:'.length:'set rule:'.length)).trim();
+    changed = true;
+  }
+
+  if (!changed) return false;
+  await setPersonaProfile(p);
+  chatMessages.push({ role:'assistant', content: 'Persona updated.' });
+  renderChat();
+  try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+  return true;
+}
 
 function renderUser() {
   chrome.storage.local.get(["hive_extension_user"], (items: any) => {
@@ -29,6 +189,28 @@ function renderUser() {
       userInfo.textContent = `${user.displayName ?? user.userId}`;
     }
   });
+
+personaFormality?.addEventListener("input", () => {
+  if (valFormality) valFormality.textContent = personaFormality.value;
+});
+personaConcision?.addEventListener("input", () => {
+  if (valConcision) valConcision.textContent = personaConcision.value;
+});
+
+savePersonaBtn?.addEventListener("click", async () => {
+  const p = {
+    name: (personaName?.value || "My Hive").trim(),
+    tone: {
+      formality: Number(personaFormality?.value || 50),
+      concision: Number(personaConcision?.value || 50)
+    },
+    keywords: (personaKeywords?.value || "").trim(),
+    bio: (personaBio?.value || "").trim(),
+    rules: (personaRules?.value || "").trim()
+  };
+  await setPersonaProfile(p);
+  alert("Persona saved");
+});
 }
 
 async function initProviderUI() {
@@ -42,10 +224,23 @@ async function initProviderUI() {
   updateTokenLabel();
 }
 
+async function initPersonaUI() {
+  const p = await getPersonaProfile();
+  if (personaName) personaName.value = p.name || "";
+  if (personaFormality) personaFormality.value = String(p.tone?.formality ?? 50);
+  if (personaConcision) personaConcision.value = String(p.tone?.concision ?? 50);
+  if (valFormality) valFormality.textContent = String(p.tone?.formality ?? 50);
+  if (valConcision) valConcision.textContent = String(p.tone?.concision ?? 50);
+  if (personaKeywords) personaKeywords.value = p.keywords || "";
+  if (personaBio) personaBio.value = p.bio || "";
+  if (personaRules) personaRules.value = p.rules || "";
+}
+
 chrome.runtime.onMessage.addListener((msg: any) => {
   if (msg?.type === "SHOW_SESSION_REQUEST") {
     pendingSession = msg.payload as SessionRequest;
     renderSession();
+    renderChatApproval();
   }
 });
 
@@ -56,11 +251,21 @@ chrome.storage.local.get(["hive_pending_session"], (items: any) => {
     pendingSession = s;
     renderSession();
     chrome.storage.local.remove(["hive_pending_session"]);
+    renderChatApproval();
   }
 });
 
 // Initialize provider UI on load
 void initProviderUI();
+void initPersonaUI();
+switchTab('chat');
+renderChat();
+// Restore chat log
+try { chrome.storage.local.get(['hive_popup_chat_log'], (i:any)=>{ const arr = Array.isArray(i['hive_popup_chat_log']) ? i['hive_popup_chat_log'] : []; if (arr.length){ (chatMessages as any).splice(0, chatMessages.length, ...arr); renderChat(); } }); } catch {}
+// Init context badge
+function refreshCtxSize(){ try { chrome.storage.local.get(['hive_last_context_size'], (i:any)=>{ const n = Number(i['hive_last_context_size'] || 0); if (ctxSizeEl) ctxSizeEl.textContent = String(n); }); } catch {} }
+refreshCtxSize();
+try { chrome.storage.onChanged.addListener((changes:any)=>{ if (changes && changes['hive_last_context_size']) refreshCtxSize(); }); } catch {}
 
 function renderSession() {
   if (!pendingSession) {
@@ -98,6 +303,7 @@ function renderSession() {
     pendingSession = null;
     chrome.storage.local.remove(["hive_pending_session"]);
     renderSession();
+    renderChatApproval();
   };
 
   div.appendChild(singleUseWrap);
@@ -128,6 +334,7 @@ async function approveSession() {
   pendingSession = null;
   chrome.storage.local.remove(["hive_pending_session"]);
   renderSession();
+  renderChatApproval();
 }
 
 setSample.addEventListener("click", () => {
@@ -208,10 +415,41 @@ debugInfoBtn?.addEventListener("click", () => {
 
 renderUser();
 renderSession();
+tabChatBtn?.addEventListener('click', ()=> switchTab('chat'));
+tabConfigBtn?.addEventListener('click', ()=> switchTab('config'));
+
+async function sendChat(){
+  const q = (chatInput?.value || '').trim();
+  if (!q) return;
+  chatInput!.value = '';
+  chatMessages.push({ role: 'user', content: q });
+  renderChat();
+  if (chatSend) chatSend.disabled = true;
+  // Persist chat log (lightweight)
+  try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+
+  // Intent parsing to edit Persona directly via chat
+  const handled = await tryHandleIntent(q);
+  if (handled){ if (chatSend) chatSend.disabled = false; return; }
+
+  chrome.runtime.sendMessage({ type: 'HIVE_POPUP_CHAT', payload: { messages: chatMessages } }, (resp: any)=>{
+    if (!resp || !resp.ok){
+      chatMessages.push({ role: 'assistant', content: resp?.error ? String(resp.error) : 'Chat failed. Check provider in Config.' });
+    } else {
+      chatMessages.push({ role: 'assistant', content: resp.text || '(no text)' });
+    }
+    renderChat();
+    if (chatSend) chatSend.disabled = false;
+    try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+  });
+}
+
+chatSend?.addEventListener('click', sendChat);
+chatInput?.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') { e.preventDefault(); sendChat(); } });
 
 function updateTokenLabel() {
   const active = (providerSelect?.value || "openai") as ProviderId;
   const label = document.getElementById("provider-token-label");
   if (!label) return;
-  label.textContent = active === 'local' ? 'Base URL' : 'API Key';
+  label.textContent = (active === 'local' || active === 'grok') ? 'Base URL' : 'API Key';
 }

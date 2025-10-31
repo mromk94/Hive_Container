@@ -5,7 +5,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const chrome: any;
 
-export type ProviderId = 'openai' | 'gemini' | 'claude' | 'local';
+export type ProviderId = 'openai' | 'gemini' | 'claude' | 'grok' | 'deepseek' | 'local';
 
 export type ProviderRegistry = {
   active: ProviderId;
@@ -106,4 +106,59 @@ export async function getProviderToken(p: ProviderId): Promise<string | undefine
   const store = obj['hive_provider_tokens_enc'] || {};
   const enc = store[p];
   return decryptToken(enc);
+}
+
+// Persona Profile (encrypted at rest)
+export type PersonaProfile = {
+  name: string;
+  tone: { formality: number; concision: number };
+  keywords: string; // comma-separated
+  bio: string;
+  rules: string; // do/don't and preferences
+};
+
+const PERSONA_KEY = 'hive_persona_profile_enc';
+
+function defaultPersona(): PersonaProfile {
+  return {
+    name: 'My Hive',
+    tone: { formality: 50, concision: 50 },
+    keywords: '',
+    bio: '',
+    rules: ''
+  };
+}
+
+export async function getPersonaProfile(): Promise<PersonaProfile> {
+  const obj = await new Promise<Record<string, any>>((res)=>chrome.storage.local.get([PERSONA_KEY], (i:any)=>res(i||{})));
+  const enc = obj[PERSONA_KEY];
+  if (!enc) return defaultPersona();
+  try {
+    const json = await decryptToken(enc);
+    const parsed = json ? JSON.parse(json) : null;
+    if (!parsed) return defaultPersona();
+    // basic shape validation
+    return {
+      name: typeof parsed.name === 'string' ? parsed.name : 'My Hive',
+      tone: {
+        formality: Math.max(0, Math.min(100, Number(parsed?.tone?.formality ?? 50))),
+        concision: Math.max(0, Math.min(100, Number(parsed?.tone?.concision ?? 50)))
+      },
+      keywords: typeof parsed.keywords === 'string' ? parsed.keywords : '',
+      bio: typeof parsed.bio === 'string' ? parsed.bio : '',
+      rules: typeof parsed.rules === 'string' ? parsed.rules : ''
+    };
+  } catch {
+    return defaultPersona();
+  }
+}
+
+export async function setPersonaProfile(p: PersonaProfile | undefined): Promise<void> {
+  if (!p) {
+    await new Promise((res)=>chrome.storage.local.remove([PERSONA_KEY], ()=>res(null)));
+    return;
+  }
+  const serialized = JSON.stringify(p);
+  const enc = await encryptToken(serialized);
+  await new Promise((res)=>chrome.storage.local.set({ [PERSONA_KEY]: enc }, ()=>res(null)));
 }
