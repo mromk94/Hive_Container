@@ -75,3 +75,14 @@
  - 23:55 Added dev watch scripts (watch:bg/cs/popup, watch) and installed npm-run-all.
  - 23:58 Fixed lint/structure issues: removed misplaced Local block from HIVE_LIST_MODELS; consolidated Local forwarding under APP_FORWARD_REQUEST.
  - 00:05 Demo UX: added loading/steps animation and human-friendly response card with provider/model badges; technical details collapsed.
+ - 00:12 Core Vision logged: Portable Persona + Handshake + Shared Consciousness Loop. Summary:
+   - Portable persona travels across the web and conditions site AIs upon user approval (origin-scoped).
+   - Handshake protocol lets a site request persona, suggest replies, and update context.
+   - Shared memory loop maintains rolling transcript and preferences per origin + global.
+   - Privacy controls: allowlist/denylist and on-page active banner with quick toggle.
+ - 00:13 Next Steps decided:
+   1) Persona Profile schema + encrypted storage + popup editor (sliders + notes).
+   2) Handshake Protocol v1: GET_PERSONA, SUGGEST_REPLY, UPDATE_CONTEXT with approvals.
+   3) Generic Chat Adapter v1: floating “Ask My Hive” near textareas, suggestion panel.
+   4) Shared memory per session/origin; inject into provider prompts.
+   5) Privacy controls (allow/deny + quick toggle UI).

@@ -68,6 +68,19 @@ Carry your AI persona across the web with explicit consent, client-side cryptogr
 - HCP Gateway mock server for token verification
 - Tests (Jest/Playwright), CI, packaging, and store listing assets
 
+## Core Vision (Portable Persona + Handshake + Shared Consciousness)
+- Your personal AI persona travels with you across the web.
+- When a site has its own AI, Hive performs a consented handshake so the site AI temporarily adopts your persona.
+- A rolling context (shared memory loop) maintains continuity and preferences.
+- Privacy controls (allowlist/denylist) keep you in control per origin.
+
+### Implementation Path (V1)
+1. Persona Profile schema + encrypted storage + popup editor (sliders and notes).
+2. Handshake Protocol v1: GET_PERSONA, SUGGEST_REPLY, UPDATE_CONTEXT with approvals.
+3. Generic Chat Adapter v1: floating “Ask My Hive” near textareas, suggestion panel.
+4. Shared memory per session/origin; inject into provider prompts.
+5. Privacy controls (allow/deny per origin + quick toggle UI/banner).
+
 ## Troubleshooting
 - "Could not load manifest" — ensure you selected the `hive-extension` folder
 - "Content script not running on demo" — enable “Allow access to file URLs” or serve via localhost
