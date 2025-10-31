@@ -6,7 +6,13 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
       :root { --gold: #d4af37; --bg: #0a0a0a; --panel: #0f0f0f; --text: #f4f4f4; --muted:#9a9a9a; --danger:#e74c3c; --outline:#1f1f1f; }
-      body { font-family: system-ui, sans-serif; padding:12px; width:320px; background: radial-gradient(1200px 600px at -20% -30%, rgba(212,175,55,0.08), transparent 60%), var(--bg); color: var(--text); }
+      body { font-family: system-ui, sans-serif; padding:10px; width:340px; background: radial-gradient(1200px 600px at -20% -30%, rgba(212,175,55,0.08), transparent 60%), var(--bg); color: var(--text); }
+      .popup-shell { border-radius:16px; border:1px solid #202020; background:linear-gradient(180deg,#121212,#0c0c0c); box-shadow: 0 18px 34px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.03); padding:10px; }
+      .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+      .title { color: var(--gold); font-weight:700; letter-spacing:.3px; text-shadow:0 0 14px rgba(212,175,55,.22); }
+      .window-buttons { display:flex; gap:6px; }
+      .icon-btn { width:26px; height:26px; border-radius:8px; border:1px solid var(--outline); background:#151515; color:#ddd; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 10px 20px rgba(0,0,0,.25); }
+      .icon-btn:hover { border-color: var(--gold); box-shadow:0 10px 22px rgba(212,175,55,.18); }
       h3 { color: var(--gold); margin: 4px 0 10px; letter-spacing: .3px; text-shadow: 0 0 18px rgba(212,175,55,.15); }
       h4 { color: var(--gold); margin: 8px 0 6px; font-weight: 600; }
       hr { border:0; border-top:1px solid #1a1a1a; margin:10px 0; }
@@ -28,16 +34,31 @@
       .tabs { display:flex; gap:8px; margin-bottom:8px; }
       .tabbtn { flex:1; padding:8px; border-radius:10px; border:1px solid var(--outline); background:#121212; color:var(--text); cursor:pointer; }
       .tabbtn.active { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(212,175,55,.15) inset; }
-      .chat-log { height: 260px; overflow:auto; border:1px solid var(--outline); border-radius:10px; padding:8px; background: linear-gradient(180deg, #131313, #0f0f0f); }
-      .msg { margin:8px 0; }
-      .msg .who { font-size:11px; color: var(--muted); }
-      .msg .bubble { margin-top:2px; padding:8px; border-radius:10px; border:1px solid var(--outline); background:#0f0f0f; }
+      .chat-log { height: 280px; overflow:auto; border:1px solid var(--outline); border-radius:12px; padding:10px; background: linear-gradient(180deg, #131313, #0f0f0f); box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
+      .msg { display:flex; gap:8px; margin:10px 0; align-items:flex-start; animation: fadeIn .18s ease both; }
+      .msg.you { flex-direction: row-reverse; }
+      .avatar { width:28px; height:28px; border-radius:50%; border:1px solid var(--outline); background:#0d0d0d; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:12px; box-shadow:0 6px 16px rgba(0,0,0,.25); }
+      .bubble { max-width: 78%; padding:8px 10px; border-radius:14px; border:1px solid var(--outline); background:#0f0f0f; box-shadow:0 10px 22px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.02); animation: popIn .16s ease both; }
+      .you .bubble { background: linear-gradient(180deg, rgba(212,175,55,.16), rgba(212,175,55,.08)); border-color:#2a2415; }
+      .who { font-size:10px; color: var(--muted); margin-bottom:4px; }
+      @keyframes popIn { from { transform: scale(.98); opacity:.0;} to { transform: scale(1); opacity:1;} }
+      @keyframes fadeIn { from { opacity:.0; } to { opacity:1; } }
+      body.min #tab-chat .chat-log{ height: 90px; }
     </style>
   </head>
   <body>
+    <div id="app" class="popup-shell">
+    <div class="topbar">
+      <div class="title">Hive</div>
+      <div class="window-buttons">
+        <button id="btn-min" class="icon-btn" title="Minimize">–</button>
+        <button id="btn-close" class="icon-btn" title="Close">×</button>
+      </div>
+    </div>
     <div class="tabs">
       <button id="tabbtn-chat" class="tabbtn active">Chat</button>
       <button id="tabbtn-config" class="tabbtn">Config</button>
+      <button id="tabbtn-profile" class="tabbtn">Profile</button>
     </div>
     <div id="tab-chat">
       <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -100,6 +121,10 @@
       <label id="provider-token-label" for="provider-token">API Key</label><br/>
       <input id="provider-token" type="password" placeholder="Enter API key" style="width:100%; margin:6px 0;" />
       <div id="secure-status" style="font-size:12px; color: var(--muted); margin-bottom:6px;">Not saved</div>
+      <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+        <input id="use-web-session" type="checkbox" />
+        <label for="use-web-session">Use Web Session (if signed in on provider site)</label>
+      </div>
       <div>
         <button id="save-token" class="btn">Save</button>
         <button id="clear-token" class="btn" style="margin-left:8px;">Clear</button>
@@ -122,11 +147,42 @@
       </div>
       <div class="value" style="margin-top:6px;">Uses provider login pages for now. API Keys still work.</div>
     </div>
+    <div class="row">
+      <h4>Google OAuth (Gemini)</h4>
+      <label for="google-client-id">Client ID</label>
+      <input id="google-client-id" placeholder="xxxxxxxxx-xxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
+      <label for="google-scopes" style="margin-top:6px; display:block;">Scopes</label>
+      <input id="google-scopes" value="https://www.googleapis.com/auth/generative-language" />
+      <div style="margin-top:6px;"><button id="save-google-oauth" class="btn">Save Google OAuth</button></div>
+      <div class="value" style="margin-top:6px;">We store tokens encrypted locally.</div>
+    </div>
     <hr/>
     <h4>Controls</h4>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button id="revoke-last" class="btn deny">Revoke Last Session</button>
       <button id="debug-info" class="btn">Debug Info</button>
+    </div>
+    </div>
+    <div id="tab-profile" style="display:none;">
+      <h3>User Profile</h3>
+      <div class="row">
+        <label for="profile-personality">Personality</label>
+        <textarea id="profile-personality" placeholder="Describe your personality, tone, quirks..."></textarea>
+        <label for="profile-allergies" style="margin-top:6px; display:block;">Allergies (optional)</label>
+        <input id="profile-allergies" placeholder="e.g. peanuts, shellfish" />
+        <label for="profile-preferences" style="margin-top:6px; display:block;">Preferences</label>
+        <textarea id="profile-preferences" placeholder="e.g. prefers concise responses, metric units"></textarea>
+        <label for="profile-location" style="margin-top:6px; display:block;">Location (optional)</label>
+        <input id="profile-location" placeholder="City, Country" />
+        <label for="profile-interests" style="margin-top:6px; display:block;">Interests</label>
+        <input id="profile-interests" placeholder="comma-separated" />
+        <label for="profile-education" style="margin-top:6px; display:block;">Education</label>
+        <input id="profile-education" placeholder="e.g. BSc Computer Science" />
+        <label for="profile-socials" style="margin-top:6px; display:block;">Social handles</label>
+        <textarea id="profile-socials" placeholder="@x_handle, linkedin.com/in/you ..."></textarea>
+        <div style="margin-top:8px;"><button id="save-profile" class="btn">Save Profile</button></div>
+      </div>
+      <div class="value">Stored encrypted locally. Shared with your AI for personalization.</div>
     </div>
     </div>
     <script src="popup.js"></script>

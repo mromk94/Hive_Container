@@ -1,0 +1,14 @@
+{
+  "name": "@hive-container/adapter",
+  "version": "0.1.0",
+  "description": "Embeddable browser adapter to let the Hive Container extension use your site's authenticated session for AI requests.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "license": "MIT",
+  "keywords": ["hive", "extension", "adapter", "ai", "llm", "browser"],
+  "publishConfig": { "access": "public" }
+}

@@ -1,6 +1,7 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import type { ProviderId } from "./registry";
-import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile } from "./registry";
+import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile, getUserProfile, setUserProfile, getUseWebSession, setUseWebSession } from "./registry";
+import { getDefaultGoogleOAuth } from './config.oauth';
 
 declare const chrome: any;
 
@@ -10,13 +11,17 @@ const setSample = document.getElementById("set-sample-user")!;
 // Tabs & Chat UI
 const tabChatBtn = document.getElementById("tabbtn-chat") as HTMLButtonElement | null;
 const tabConfigBtn = document.getElementById("tabbtn-config") as HTMLButtonElement | null;
+const tabProfileBtn = document.getElementById("tabbtn-profile") as HTMLButtonElement | null;
 const tabChat = document.getElementById("tab-chat") as HTMLDivElement | null;
 const tabConfig = document.getElementById("tab-config") as HTMLDivElement | null;
+const tabProfile = document.getElementById("tab-profile") as HTMLDivElement | null;
 const chatLog = document.getElementById("chat-log") as HTMLDivElement | null;
 const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
 const chatSend = document.getElementById("chat-send") as HTMLButtonElement | null;
 const chatApproval = document.getElementById("chat-approval") as HTMLDivElement | null;
 const ctxSizeEl = document.getElementById('ctx-size') as HTMLSpanElement | null;
+const btnMin = document.getElementById('btn-min') as HTMLButtonElement | null;
+const btnClose = document.getElementById('btn-close') as HTMLButtonElement | null;
 const providerSelect = document.getElementById("provider-select") as HTMLSelectElement | null;
 const saveTokenBtn = document.getElementById("save-token") as HTMLButtonElement | null;
 const clearTokenBtn = document.getElementById("clear-token") as HTMLButtonElement | null;
@@ -27,12 +32,17 @@ const providerModelInput = document.getElementById("provider-model") as HTMLInpu
 const saveModelBtn = document.getElementById("save-model") as HTMLButtonElement | null;
 const listModelsBtn = document.getElementById("list-models") as HTMLButtonElement | null;
 const secureStatus = document.getElementById("secure-status") as HTMLDivElement | null;
+const useWebSessionEl = document.getElementById('use-web-session') as HTMLInputElement | null;
 // OAuth buttons
 const oauthOpenAI = document.getElementById('oauth-openai') as HTMLButtonElement | null;
 const oauthGemini = document.getElementById('oauth-gemini') as HTMLButtonElement | null;
 const oauthClaude = document.getElementById('oauth-claude') as HTMLButtonElement | null;
 const oauthGrok = document.getElementById('oauth-grok') as HTMLButtonElement | null;
 const oauthDeepseek = document.getElementById('oauth-deepseek') as HTMLButtonElement | null;
+// Google OAuth inputs (Gemini)
+const googleClientIdInput = document.getElementById('google-client-id') as HTMLInputElement | null;
+const googleScopesInput = document.getElementById('google-scopes') as HTMLInputElement | null;
+const saveGoogleBtn = document.getElementById('save-google-oauth') as HTMLButtonElement | null;
 // Persona UI elements
 const personaName = document.getElementById("persona-name") as HTMLInputElement | null;
 const personaFormality = document.getElementById("persona-formality") as HTMLInputElement | null;
@@ -43,6 +53,15 @@ const personaRules = document.getElementById("persona-rules") as HTMLTextAreaEle
 const valFormality = document.getElementById("val-formality") as HTMLSpanElement | null;
 const valConcision = document.getElementById("val-concision") as HTMLSpanElement | null;
 const savePersonaBtn = document.getElementById("save-persona") as HTMLButtonElement | null;
+// Profile inputs
+const profilePersonality = document.getElementById('profile-personality') as HTMLTextAreaElement | null;
+const profileAllergies = document.getElementById('profile-allergies') as HTMLInputElement | null;
+const profilePreferences = document.getElementById('profile-preferences') as HTMLTextAreaElement | null;
+const profileLocation = document.getElementById('profile-location') as HTMLInputElement | null;
+const profileInterests = document.getElementById('profile-interests') as HTMLInputElement | null;
+const profileEducation = document.getElementById('profile-education') as HTMLInputElement | null;
+const profileSocials = document.getElementById('profile-socials') as HTMLTextAreaElement | null;
+const saveProfileBtn = document.getElementById('save-profile') as HTMLButtonElement | null;
 
 let pendingSession: SessionRequest | null = null;
 
@@ -53,13 +72,29 @@ function renderChat() {
   if (!chatLog) return;
   chatLog.innerHTML = "";
   for (const m of chatMessages) {
-    const row = document.createElement('div'); row.className = 'msg';
+    const row = document.createElement('div'); row.className = 'msg' + (m.role === 'user' ? ' you' : '');
+    const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = m.role === 'assistant' ? 'H' : (m.role === 'user' ? 'Y' : 'S');
+    const wrap = document.createElement('div');
     const who = document.createElement('div'); who.className = 'who'; who.textContent = m.role === 'assistant' ? 'Hive' : (m.role === 'user' ? 'You' : 'System');
     const bub = document.createElement('div'); bub.className = 'bubble'; bub.textContent = m.content;
-    row.appendChild(who); row.appendChild(bub);
+    wrap.appendChild(who); wrap.appendChild(bub);
+    row.appendChild(avatar); row.appendChild(wrap);
     chatLog.appendChild(row);
   }
   chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+async function initUserProfileUI(){
+  try {
+    const p = await getUserProfile();
+    if (profilePersonality) profilePersonality.value = p.personality || '';
+    if (profileAllergies) profileAllergies.value = p.allergies || '';
+    if (profilePreferences) profilePreferences.value = p.preferences || '';
+    if (profileLocation) profileLocation.value = p.location || '';
+    if (profileInterests) profileInterests.value = p.interests || '';
+    if (profileEducation) profileEducation.value = p.education || '';
+    if (profileSocials) profileSocials.value = p.socials || '';
+  } catch {}
 }
 
 function renderChatApproval(){
@@ -86,6 +121,27 @@ function renderChatApproval(){
   const denyBtn = document.getElementById('deny-in-chat') as HTMLButtonElement | null;
   const customizeBtn = document.getElementById('customize-in-chat') as HTMLButtonElement | null;
   approveBtn?.addEventListener('click', async ()=>{ await approveSession(); renderChatApproval(); });
+
+useWebSessionEl?.addEventListener('change', async ()=>{
+  const active = (providerSelect?.value || 'openai') as ProviderId;
+  const on = !!useWebSessionEl?.checked;
+  await setUseWebSession(active, on);
+  if (providerTokenInput) providerTokenInput.disabled = on;
+});
+
+saveProfileBtn?.addEventListener('click', async ()=>{
+  const p = {
+    personality: (profilePersonality?.value || '').trim(),
+    allergies: (profileAllergies?.value || '').trim(),
+    preferences: (profilePreferences?.value || '').trim(),
+    location: (profileLocation?.value || '').trim(),
+    interests: (profileInterests?.value || '').trim(),
+    education: (profileEducation?.value || '').trim(),
+    socials: (profileSocials?.value || '').trim(),
+  };
+  await setUserProfile(p);
+  alert('Profile saved');
+});
   denyBtn?.addEventListener('click', ()=>{
     pendingSession = null;
     chrome.storage.local.remove(["hive_pending_session"]);
@@ -95,18 +151,29 @@ function renderChatApproval(){
   customizeBtn?.addEventListener('click', ()=>{ switchTab('config'); });
 }
 
-function switchTab(which: 'chat'|'config'){
-  if (!tabChat || !tabConfig || !tabChatBtn || !tabConfigBtn) return;
+function switchTab(which: 'chat'|'config'|'profile'){
+  if (!tabChat || !tabConfig || !tabChatBtn || !tabConfigBtn || !tabProfile) return;
   if (which === 'chat'){
     tabChat.style.display = '';
     tabConfig.style.display = 'none';
+    tabProfile.style.display = 'none';
     tabChatBtn.classList.add('active');
     tabConfigBtn.classList.remove('active');
+    tabProfileBtn?.classList.remove('active');
   } else {
     tabChat.style.display = 'none';
-    tabConfig.style.display = '';
     tabChatBtn.classList.remove('active');
-    tabConfigBtn.classList.add('active');
+    if (which === 'config'){
+      tabConfig.style.display = '';
+      tabProfile.style.display = 'none';
+      tabConfigBtn.classList.add('active');
+      tabProfileBtn?.classList.remove('active');
+    } else {
+      tabConfig.style.display = 'none';
+      tabProfile.style.display = '';
+      tabConfigBtn.classList.remove('active');
+      tabProfileBtn?.classList.add('active');
+    }
   }
 }
 
@@ -222,6 +289,11 @@ async function initProviderUI() {
   if (secureStatus) secureStatus.textContent = existing ? "Stored securely" : "Not saved";
   if (providerModelInput) providerModelInput.value = (reg.prefModels?.[reg.active as ProviderId] || "");
   updateTokenLabel();
+  try {
+    const w = await getUseWebSession(reg.active as ProviderId);
+    if (useWebSessionEl) useWebSessionEl.checked = !!w;
+    if (providerTokenInput) providerTokenInput.disabled = !!w;
+  } catch {}
 }
 
 async function initPersonaUI() {
@@ -258,14 +330,33 @@ chrome.storage.local.get(["hive_pending_session"], (items: any) => {
 // Initialize provider UI on load
 void initProviderUI();
 void initPersonaUI();
+void initUserProfileUI();
 switchTab('chat');
 renderChat();
-// Restore chat log
-try { chrome.storage.local.get(['hive_popup_chat_log'], (i:any)=>{ const arr = Array.isArray(i['hive_popup_chat_log']) ? i['hive_popup_chat_log'] : []; if (arr.length){ (chatMessages as any).splice(0, chatMessages.length, ...arr); renderChat(); } }); } catch {}
+// OAuth inputs persistence (Google/Gemini)
+try {
+  chrome.storage.local.get(['hive_google_client_id','hive_google_scopes'], (i:any)=>{
+    const def = getDefaultGoogleOAuth();
+    const cid = i['hive_google_client_id'] || def.clientId || '';
+    const scopes = i['hive_google_scopes'] || def.scopes || 'https://www.googleapis.com/auth/generative-language';
+    if (googleClientIdInput) googleClientIdInput.value = cid;
+    if (googleScopesInput) googleScopesInput.value = scopes;
+    if (cid) {
+      // Hide manual config if default is present
+      const btn = document.getElementById('save-google-oauth');
+      const row = btn?.closest('.row') as HTMLElement | null;
+      if (row) row.style.display = 'none';
+    }
+  });
+} catch {}
 // Init context badge
 function refreshCtxSize(){ try { chrome.storage.local.get(['hive_last_context_size'], (i:any)=>{ const n = Number(i['hive_last_context_size'] || 0); if (ctxSizeEl) ctxSizeEl.textContent = String(n); }); } catch {} }
 refreshCtxSize();
 try { chrome.storage.onChanged.addListener((changes:any)=>{ if (changes && changes['hive_last_context_size']) refreshCtxSize(); }); } catch {}
+
+// Minimize/Close buttons
+btnMin?.addEventListener('click', ()=>{ try { document.body.classList.toggle('min'); } catch {} });
+btnClose?.addEventListener('click', ()=>{ try { window.close(); } catch {} });
 
 function renderSession() {
   if (!pendingSession) {
@@ -353,6 +444,11 @@ providerSelect?.addEventListener("change", async () => {
   const existing = await getProviderToken(active);
   if (secureStatus) secureStatus.textContent = existing ? "Stored securely" : "Not saved";
   updateTokenLabel();
+  try {
+    const w = await getUseWebSession(active);
+    if (useWebSessionEl) useWebSessionEl.checked = !!w;
+    if (providerTokenInput) providerTokenInput.disabled = !!w;
+  } catch {}
 });
 
 saveTokenBtn?.addEventListener("click", async () => {
@@ -417,6 +513,7 @@ renderUser();
 renderSession();
 tabChatBtn?.addEventListener('click', ()=> switchTab('chat'));
 tabConfigBtn?.addEventListener('click', ()=> switchTab('config'));
+tabProfileBtn?.addEventListener('click', ()=> switchTab('profile'));
 
 async function sendChat(){
   const q = (chatInput?.value || '').trim();

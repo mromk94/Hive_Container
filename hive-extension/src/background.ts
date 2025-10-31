@@ -1,7 +1,8 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import { signStringES256 } from "./crypto";
 import { isAllowedOrigin } from "./config";
-import { getRegistry, getPreferredModel, setPreferredModel, getProviderToken, getPersonaProfile } from "./registry";
+import { getRegistry, getPreferredModel, setPreferredModel, getProviderToken, getPersonaProfile, setProviderToken, getUserProfile, getUseWebSession } from "./registry";
+import { getDefaultGoogleOAuth } from "./config.oauth";
 declare const chrome: any;
 
 const EXT_STORAGE_KEY = "hive_extension_user";
@@ -12,6 +13,47 @@ const BUILD_INFO = "hive-ext build: 2025-10-31 gemini-v1 latest + registry";
 
 async function getStoredUser(): Promise<any | null> {
   return new Promise((res) => chrome.storage.local.get([EXT_STORAGE_KEY], (items: Record<string, any>) => res(items[EXT_STORAGE_KEY] ?? null)));
+}
+
+// Provider proxy plumbing (page-session fetch)
+const proxyWaiters = new Map<string, (payload: any) => void>();
+function randomId(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+async function findProviderTabs(provider: string): Promise<Array<{ id: number, url?: string }>> {
+  const patterns: string[] =
+    provider === 'openai' ? ['*://chatgpt.com/*','*://*.openai.com/*'] :
+    provider === 'claude' ? ['*://claude.ai/*'] :
+    provider === 'grok' ? ['*://x.ai/*'] :
+    provider === 'gemini' ? ['*://gemini.google.com/*','*://*.google.com/*'] :
+    provider === 'deepseek' ? ['*://deepseek.com/*','*://*.deepseek.com/*'] :
+    [];
+  return new Promise((res)=>{
+    if (!patterns.length) return res([]);
+    const out: Array<{id:number,url?:string}> = [];
+    chrome.tabs.query({}, (tabs:any[])=>{
+      for (const t of tabs){
+        const u = (t.url || '') as string;
+        if (patterns.some(p=>{
+          const re = new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\\*/g,'.*') + '$');
+          return re.test(u);
+        })) out.push({ id: t.id, url: t.url });
+      }
+      res(out);
+    });
+  });
+}
+function sendViaTab(tabId: number, url: string, init: RequestInit, allowedOrigins: string[]): Promise<any> {
+  return new Promise((res)=>{
+    const id = randomId();
+    proxyWaiters.set(id, (payload:any)=>{ res(payload); });
+    chrome.tabs.sendMessage(tabId, { type: 'HIVE_PROVIDER_PROXY', payload: { id, url, init, allowedOrigins } }, ()=>{
+      // ignore lastError if no direct response, we wait for RESULT
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      chrome.runtime.lastError;
+    });
+    setTimeout(()=>{
+      if (proxyWaiters.has(id)) { proxyWaiters.delete(id); res({ ok:false, error:'proxy_timeout' }); }
+    }, 10000);
+  });
 }
 
 // Small helper to bound latency on outbound requests
@@ -162,6 +204,44 @@ function setActionIcons(){
 chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (resp: any) => void) => {
   // Ensure icon set when background activates
   setActionIcons();
+  if (msg?.type === 'HIVE_PROVIDER_PROXY_RESULT') {
+    const id = msg?.payload?.id;
+    if (id && proxyWaiters.has(id)) {
+      const fn = proxyWaiters.get(id)!;
+      proxyWaiters.delete(id);
+      try { fn(msg.payload); } catch {}
+    }
+    // not a request-response path
+  }
+  if (msg?.type === 'HIVE_OAUTH_GEMINI_START') {
+    (async () => {
+      try {
+        const cfg = await new Promise<Record<string, any>>((res)=>chrome.storage.local.get(['hive_google_client_id','hive_google_scopes'], (i:any)=>res(i||{})));
+        const d = getDefaultGoogleOAuth();
+        const clientId = (cfg['hive_google_client_id'] || d.clientId || '').toString();
+        const scopes = (cfg['hive_google_scopes'] || d.scopes || 'https://www.googleapis.com/auth/generative-language').toString();
+        if (!clientId) return sendResponse({ ok: false, error: 'missing_client_id' });
+        const redirect = chrome.identity.getRedirectURL();
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirect)}&scope=${encodeURIComponent(scopes)}`;
+        chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, async (redirectUrl?: string) => {
+          try {
+            if (!redirectUrl) return sendResponse({ ok: false, error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'no_redirect' });
+            const hash = redirectUrl.split('#')[1] || '';
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            if (!accessToken) return sendResponse({ ok: false, error: 'no_access_token' });
+            await setProviderToken('gemini', `oauth:${accessToken}` as any);
+            return sendResponse({ ok: true });
+          } catch (e) {
+            return sendResponse({ ok: false, error: String(e) });
+          }
+        });
+      } catch (e) {
+        return sendResponse({ ok: false, error: String(e) });
+      }
+    })();
+    return true;
+  }
   if (msg?.type === "HIVE_SESSION_REQUEST") {
     (async () => {
       await new Promise((res) => chrome.storage.local.set({ hive_pending_session: msg.payload as SessionRequest }, () => res(null)));
@@ -223,20 +303,48 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         if (!active) return sendResponse({ ok: false, error: "no_active_provider" });
         if (!key && active !== 'local') return sendResponse({ ok: false, error: "no_provider_key" });
         const sysPersona = await getPersonaProfile();
+        const usr = await getUserProfile();
         const lang = (typeof navigator !== 'undefined' && (navigator as any)?.language) || (chrome && chrome.i18n && chrome.i18n.getUILanguage && chrome.i18n.getUILanguage()) || 'en';
         const kws = (sysPersona.keywords || "").split(",").map((s)=>s.trim()).filter(Boolean).slice(0,5).join(", ");
-        const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
+        const up = [
+          usr.personality && `Personality: ${usr.personality}`,
+          usr.allergies && `Allergies: ${usr.allergies}`,
+          usr.preferences && `Preferences: ${usr.preferences}`,
+          usr.location && `Location: ${usr.location}`,
+          usr.interests && `Interests: ${usr.interests}`,
+          usr.education && `Education: ${usr.education}`,
+          usr.socials && `Socials: ${usr.socials}`
+        ].filter(Boolean).join(' | ');
+        const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''}${up?` User Profile: ${up}.`:''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
         const baseMessages = Array.isArray(messages) ? messages : [];
         const finalMessages = [{ role:'system', content: sys }, ...baseMessages];
 
-        if (active === 'openai' && key) {
+        if (active === 'openai') {
+          const useWeb = await getUseWebSession('openai');
+          const mappedBody = { model: model || reg.prefModels?.openai || 'gpt-4o-mini', messages: finalMessages, temperature: 0.7 };
+          if (useWeb) {
+            const tabs = await findProviderTabs('openai');
+            if (tabs.length) {
+              const u = 'https://api.openai.com/v1/chat/completions';
+              const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(mappedBody) }, []);
+              if (r && r.ok) {
+                const text = r.data?.choices?.[0]?.message?.content || '';
+                return sendResponse({ ok: true, text, raw: r.data, via: 'web_session' });
+              }
+              return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+            }
+            return sendResponse({ ok: false, error: 'web_session_not_found' });
+          }
+          if (key) {
           const { resp, json } = await fetchJsonWithTimeout('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: model || reg.prefModels?.openai || 'gpt-4o-mini', messages: finalMessages, temperature: 0.7 })
+            body: JSON.stringify(mappedBody)
           }, 15000);
           const text = json?.choices?.[0]?.message?.content || '';
           return sendResponse({ ok: resp.ok, text, raw: json });
+          }
+          return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
         if (active === 'deepseek' && key) {
@@ -272,13 +380,37 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           return sendResponse({ ok: resp.ok, text, raw: json });
         }
 
-        if (active === 'gemini' && key) {
+        if (active === 'gemini') {
           const mapped = mapOpenAIToGeminiBody({ model: model || reg.prefModels?.gemini, messages: finalMessages });
-          const u = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent?key=${encodeURIComponent(key)}`;
-          const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: mapped.contents }) }, 15000);
-          const parts = json?.candidates?.[0]?.content?.parts || [];
-          const text = parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n');
-          return sendResponse({ ok: resp.ok, text, raw: json });
+          const useWeb = await getUseWebSession('gemini');
+          if (useWeb) {
+            const tabs = await findProviderTabs('gemini');
+            if (tabs.length) {
+              const u = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
+              const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ contents: mapped.contents }) }, []);
+              if (r && r.ok) {
+                const parts = r.data?.candidates?.[0]?.content?.parts || [];
+                const text = parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n');
+                return sendResponse({ ok: true, text, raw: r.data, via: 'web_session' });
+              }
+              return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+            }
+            return sendResponse({ ok: false, error: 'web_session_not_found' });
+          }
+          const key = (await getProviderToken('gemini')) || reg.tokens?.['gemini'];
+          if (key) {
+            const isOAuth = typeof key === 'string' && key.startsWith('oauth:');
+            const token = isOAuth ? key.slice('oauth:'.length) : key;
+            const base = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
+            const url = isOAuth ? base : `${base}?key=${encodeURIComponent(token)}`;
+            const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+            if (isOAuth) headers['Authorization'] = `Bearer ${token}`;
+            const { resp, json } = await fetchJsonWithTimeout(url, { method: 'POST', headers, body: JSON.stringify({ contents: mapped.contents }) }, 15000);
+            const parts = json?.candidates?.[0]?.content?.parts || [];
+            const text = parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n');
+            return sendResponse({ ok: resp.ok, text, raw: json });
+          }
+          return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
         if (active === 'local' && key) {
@@ -416,7 +548,15 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       const { sessionId } = msg.payload || {};
       if (!sessionId) return sendResponse({ ok: false, error: "invalid_args" });
       await revokeSession(sessionId);
-      sendResponse({ ok: true });
+      try { await new Promise((res)=>chrome.storage.local.remove(['hive_last_session_id'], ()=>res(null))); } catch {}
+      try {
+        chrome.tabs.query({}, (tabs:any[])=>{
+          for (const t of tabs) {
+            try { chrome.tabs.sendMessage(t.id, { type: 'HIVE_SESSION_REVOKED', payload: { sessionId } }); } catch {}
+          }
+        });
+      } catch {}
+      sendResponse({ ok: true, revoked: sessionId });
     })();
     return true;
   }
@@ -428,8 +568,11 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       const key = (await getProviderToken(active)) || reg.tokens?.[active];
       if (active !== "gemini" || !key) return sendResponse({ ok: false, error: "no_key_or_not_gemini" });
       try {
-        const v1 = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`).then(r=>r.json());
-        const v1beta = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`).then(r=>r.json());
+        const isOAuth = typeof key === 'string' && key.startsWith('oauth:');
+        const token = isOAuth ? key.slice('oauth:'.length) : key;
+        const h: Record<string,string> = isOAuth ? { 'Authorization': `Bearer ${token}` } : {};
+        const v1 = await fetch(`https://generativelanguage.googleapis.com/v1/models${isOAuth?'':`?key=${encodeURIComponent(token)}`}`, { headers: h }).then(r=>r.json());
+        const v1beta = await fetch(`https://generativelanguage.googleapis.com/v1beta/models${isOAuth?'':`?key=${encodeURIComponent(token)}`}`, { headers: h }).then(r=>r.json());
         sendResponse({ ok: true, v1, v1beta });
       } catch (e) {
         sendResponse({ ok: false, error: String(e) });
@@ -579,14 +722,18 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           const tried: Array<{ url: string; status: number; body?: any }> = [];
           let lastJson: any = null;
           for (const model of candidateModels) {
+            const isOAuth = typeof key === 'string' && key.startsWith('oauth:');
+            const token = isOAuth ? key.slice('oauth:'.length) : key;
             const urls = [
-              `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
-              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+              `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent${isOAuth?'':`?key=${encodeURIComponent(token)}`}`,
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent${isOAuth?'':`?key=${encodeURIComponent(token)}`}`,
             ];
             for (const u of urls) {
+              const headers: Record<string,string> = { "Content-Type": "application/json" };
+              if (isOAuth) headers['Authorization'] = `Bearer ${token}`;
               const resp = await fetch(u, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: JSON.stringify({ contents: mapped.contents })
               });
               const json = await resp.json();
@@ -602,12 +749,15 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
 
           // Auto-discover models via ListModels and retry any that support generateContent
           try {
+            const isOAuth = typeof key === 'string' && key.startsWith('oauth:');
+            const token = isOAuth ? key.slice('oauth:'.length) : key;
             const lists = [
-              `https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`,
-              `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
+              `https://generativelanguage.googleapis.com/v1/models${isOAuth?'':`?key=${encodeURIComponent(token)}`}`,
+              `https://generativelanguage.googleapis.com/v1beta/models${isOAuth?'':`?key=${encodeURIComponent(token)}`}`,
             ];
             for (const listUrl of lists) {
-              const listResp = await fetch(listUrl);
+              const headers: Record<string,string> = isOAuth ? { 'Authorization': `Bearer ${token}` } : {};
+              const listResp = await fetch(listUrl, { headers });
               const listJson = await listResp.json();
               const models: any[] = Array.isArray(listJson?.models) ? listJson.models : [];
               for (const m of models) {
@@ -619,9 +769,11 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
                   `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(name)}:generateContent?key=${encodeURIComponent(key)}`,
                 ];
                 for (const u of endpoints) {
+                  const headers2: Record<string,string> = { "Content-Type": "application/json" };
+                  if (isOAuth) headers2['Authorization'] = `Bearer ${token}`;
                   const resp = await fetch(u, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: headers2,
                     body: JSON.stringify({ contents: mapped.contents })
                   });
                   const json = await resp.json();

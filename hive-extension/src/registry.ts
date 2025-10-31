@@ -11,6 +11,7 @@ export type ProviderRegistry = {
   active: ProviderId;
   tokens: Partial<Record<ProviderId, string | undefined>>;
   prefModels?: Partial<Record<ProviderId, string | undefined>>;
+  useWebSession?: Partial<Record<ProviderId, boolean>>;
 };
 
 const REGISTRY_KEY = 'hive_provider_registry';
@@ -52,6 +53,18 @@ export async function setPreferredModel(p: ProviderId, model: string | undefined
 export async function getPreferredModel(p: ProviderId): Promise<string | undefined> {
   const reg = await getRegistry();
   return reg.prefModels?.[p];
+}
+
+export async function setUseWebSession(p: ProviderId, enabled: boolean): Promise<void> {
+  const reg = await getRegistry();
+  reg.useWebSession = reg.useWebSession || {};
+  reg.useWebSession[p] = !!enabled;
+  await setRegistry(reg);
+}
+
+export async function getUseWebSession(p: ProviderId): Promise<boolean> {
+  const reg = await getRegistry();
+  return !!reg.useWebSession?.[p];
 }
 
 const VAULT_KEY = 'hive_vault_key_raw';
@@ -161,4 +174,50 @@ export async function setPersonaProfile(p: PersonaProfile | undefined): Promise<
   const serialized = JSON.stringify(p);
   const enc = await encryptToken(serialized);
   await new Promise((res)=>chrome.storage.local.set({ [PERSONA_KEY]: enc }, ()=>res(null)));
+}
+
+// Deep User Profile (encrypted at rest)
+export type UserProfile = {
+  personality: string; // free-form traits/description
+  allergies: string;   // medical: allergies (user-provided)
+  preferences: string; // general preferences
+  location: string;    // city/region (optional)
+  interests: string;   // comma-separated interests
+  education: string;   // education background
+  socials: string;     // social handles, comma-separated or lines
+};
+
+const USER_PROFILE_KEY = 'hive_user_profile_enc';
+
+function defaultUserProfile(): UserProfile {
+  return { personality: '', allergies: '', preferences: '', location: '', interests: '', education: '', socials: '' };
+}
+
+export async function getUserProfile(): Promise<UserProfile> {
+  const obj = await new Promise<Record<string, any>>((res)=>chrome.storage.local.get([USER_PROFILE_KEY], (i:any)=>res(i||{})));
+  const enc = obj[USER_PROFILE_KEY];
+  if (!enc) return defaultUserProfile();
+  try {
+    const json = await decryptToken(enc);
+    const parsed = json ? JSON.parse(json) : null;
+    if (!parsed) return defaultUserProfile();
+    return {
+      personality: typeof parsed.personality === 'string' ? parsed.personality : '',
+      allergies: typeof parsed.allergies === 'string' ? parsed.allergies : '',
+      preferences: typeof parsed.preferences === 'string' ? parsed.preferences : '',
+      location: typeof parsed.location === 'string' ? parsed.location : '',
+      interests: typeof parsed.interests === 'string' ? parsed.interests : '',
+      education: typeof parsed.education === 'string' ? parsed.education : '',
+      socials: typeof parsed.socials === 'string' ? parsed.socials : ''
+    };
+  } catch { return defaultUserProfile(); }
+}
+
+export async function setUserProfile(p: UserProfile | undefined): Promise<void> {
+  if (!p) {
+    await new Promise((res)=>chrome.storage.local.remove([USER_PROFILE_KEY], ()=>res(null)));
+    return;
+  }
+  const enc = await encryptToken(JSON.stringify(p));
+  await new Promise((res)=>chrome.storage.local.set({ [USER_PROFILE_KEY]: enc }, ()=>res(null)));
 }

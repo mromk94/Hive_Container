@@ -67,6 +67,37 @@ chrome.runtime.onMessage.addListener((msg: any) => {
     window.postMessage({ source: "HIVE_SESSION_APPROVED", payload: msg.payload }, "*");
     try { (window as any).__hiveSessionToken = msg.payload?.token; } catch {}
   }
+  if (msg?.type === 'HIVE_SESSION_REVOKED') {
+    try { (window as any).__hiveSessionToken = null; } catch {}
+    try {
+      const toast = document.createElement('div');
+      toast.textContent = 'Hive session revoked';
+      toast.setAttribute('style','position:fixed;right:16px;bottom:60px;z-index:2147483645;background:#111;color:#eee;border:1px solid #1b1b1b;border-radius:8px;padding:8px 10px;box-shadow:0 10px 20px rgba(0,0,0,.35);font-size:12px;opacity:0;transition:opacity .2s ease');
+      document.documentElement.appendChild(toast);
+      requestAnimationFrame(()=>{ toast.style.opacity='1'; setTimeout(()=>{ toast.style.opacity='0'; setTimeout(()=>toast.remove(), 250); }, 1200); });
+    } catch {}
+  }
+  if (msg?.type === 'HIVE_PROVIDER_PROXY') {
+    (async ()=>{
+      try {
+        const { url, init, allowedOrigins } = msg.payload || {};
+        const origin = window.location.origin;
+        const allow = Array.isArray(allowedOrigins) && allowedOrigins.length ? allowedOrigins : [origin];
+        if (!allow.some((a:string)=> origin.startsWith(a))) {
+          return msg._sendResponse && msg._sendResponse({ ok:false, error:'origin_not_allowed' });
+        }
+        const opts: RequestInit = { method: init?.method || 'GET', headers: init?.headers || {}, body: init?.body, credentials: 'include', mode: 'cors' } as any;
+        const resp = await fetch(url, opts);
+        const ct = resp.headers.get('content-type') || '';
+        let data: any = null;
+        if (ct.includes('application/json')) { data = await resp.json(); }
+        else { data = await resp.text(); }
+        chrome.runtime.sendMessage({ type: 'HIVE_PROVIDER_PROXY_RESULT', payload: { id: msg.payload?.id, ok: resp.ok, status: resp.status, data } });
+      } catch (e) {
+        chrome.runtime.sendMessage({ type: 'HIVE_PROVIDER_PROXY_RESULT', payload: { id: msg.payload?.id, ok: false, error: String(e) } });
+      }
+    })();
+  }
 });
 
 // Generic Chat Adapter v1
