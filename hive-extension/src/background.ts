@@ -1,7 +1,7 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import { signStringES256 } from "./crypto";
 import { isAllowedOrigin } from "./config";
-import { getRegistry } from "./registry";
+import { getRegistry, getPreferredModel } from "./registry";
 declare const chrome: any;
 
 const EXT_STORAGE_KEY = "hive_extension_user";
@@ -89,7 +89,13 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
     (async () => {
       await new Promise((res) => chrome.storage.local.set({ hive_pending_session: msg.payload as SessionRequest }, () => res(null)));
       chrome.action.openPopup();
-      try { chrome.runtime.sendMessage({ type: "SHOW_SESSION_REQUEST", payload: msg.payload as SessionRequest }); } catch {}
+      try {
+        chrome.runtime.sendMessage({ type: "SHOW_SESSION_REQUEST", payload: msg.payload as SessionRequest }, () => {
+          // Swallow error if no listener yet (popup not open)
+          // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+          chrome.runtime.lastError;
+        });
+      } catch {}
       sendResponse({ ok: true });
     })();
     return true;
@@ -114,6 +120,23 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       if (!sessionId) return sendResponse({ ok: false, error: "invalid_args" });
       await revokeSession(sessionId);
       sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (msg?.type === "HIVE_LIST_MODELS") {
+    (async () => {
+      const reg = await getRegistry();
+      const active = reg.active;
+      const key = reg.tokens?.[active];
+      if (active !== "gemini" || !key) return sendResponse({ ok: false, error: "no_key_or_not_gemini" });
+      try {
+        const v1 = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`).then(r=>r.json());
+        const v1beta = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`).then(r=>r.json());
+        sendResponse({ ok: true, v1, v1beta });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
     })();
     return true;
   }
@@ -177,26 +200,78 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
       if (active === "gemini" && key && requestPayload) {
         try {
           const mapped = mapOpenAIToGeminiBody(requestPayload);
-          const urls = [
-            `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent?key=${encodeURIComponent(key)}`,
-            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(mapped.model)}:generateContent?key=${encodeURIComponent(key)}`,
-          ];
+          const pref = await getPreferredModel("gemini");
+          const candidateModels = Array.from(new Set([
+            pref || "",
+            mapped.model,
+            mapped.model.replace('-latest',''),
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-001',
+            'gemini-1.5-pro',
+            'gemini-1.5-pro-001'
+          ]));
+          const tried: Array<{ url: string; status: number; body?: any }> = [];
           let lastJson: any = null;
-          for (const u of urls) {
-            const resp = await fetch(u, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ contents: mapped.contents })
-            });
-            const json = await resp.json();
-            if (resp.ok || resp.status !== 404) {
-              if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
-              return sendResponse({ ok: resp.ok, response: json, status: resp.status, usedUrl: u });
+          for (const model of candidateModels) {
+            const urls = [
+              `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+            ];
+            for (const u of urls) {
+              const resp = await fetch(u, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: mapped.contents })
+              });
+              const json = await resp.json();
+              tried.push({ url: u, status: resp.status, body: json });
+              if (resp.ok || resp.status !== 404) {
+                if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
+                return sendResponse({ ok: resp.ok, response: json, status: resp.status, usedUrl: u, tried });
+              }
+              lastJson = json;
             }
-            lastJson = json;
+          }
+
+          // Auto-discover models via ListModels and retry any that support generateContent
+          try {
+            const lists = [
+              `https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`,
+              `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
+            ];
+            for (const listUrl of lists) {
+              const listResp = await fetch(listUrl);
+              const listJson = await listResp.json();
+              const models: any[] = Array.isArray(listJson?.models) ? listJson.models : [];
+              for (const m of models) {
+                const name: string = m?.name || "";
+                const methods: string[] = m?.supportedGenerationMethods || m?.supported_generation_methods || [];
+                if (!name || !methods.some((x) => x.toLowerCase().includes("generatecontent"))) continue;
+                const endpoints = [
+                  `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(name)}:generateContent?key=${encodeURIComponent(key)}`,
+                  `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(name)}:generateContent?key=${encodeURIComponent(key)}`,
+                ];
+                for (const u of endpoints) {
+                  const resp = await fetch(u, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ contents: mapped.contents })
+                  });
+                  const json = await resp.json();
+                  tried.push({ url: u, status: resp.status, body: json });
+                  if (resp.ok || resp.status !== 404) {
+                    if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
+                    return sendResponse({ ok: resp.ok, response: json, status: resp.status, usedUrl: u, tried });
+                  }
+                  lastJson = json;
+                }
+              }
+            }
+          } catch (_) {
+            // ignore ListModels fallback errors; we'll return aggregated tried below
           }
           if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
-          return sendResponse({ ok: false, response: lastJson, status: 404 });
+          return sendResponse({ ok: false, response: lastJson, status: 404, tried });
         } catch (e) {
           if (sessionToken.singleUse) await markTokenUsed(sessionToken.signature);
           return sendResponse({ ok: false, error: String(e) });

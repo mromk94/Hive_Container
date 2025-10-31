@@ -10,6 +10,7 @@ export type ProviderId = 'openai' | 'gemini' | 'claude' | 'local';
 export type ProviderRegistry = {
   active: ProviderId;
   tokens: Partial<Record<ProviderId, string | undefined>>;
+  prefModels?: Partial<Record<ProviderId, string | undefined>>;
 };
 
 const REGISTRY_KEY = 'hive_provider_registry';
@@ -38,4 +39,16 @@ export async function setProviderToken(p: ProviderId, key: string | undefined): 
   reg.tokens = reg.tokens || {};
   reg.tokens[p] = key || undefined;
   await setRegistry(reg);
+}
+
+export async function setPreferredModel(p: ProviderId, model: string | undefined): Promise<void> {
+  const reg = await getRegistry();
+  reg.prefModels = reg.prefModels || {};
+  reg.prefModels[p] = model || undefined;
+  await setRegistry(reg);
+}
+
+export async function getPreferredModel(p: ProviderId): Promise<string | undefined> {
+  const reg = await getRegistry();
+  return reg.prefModels?.[p];
 }

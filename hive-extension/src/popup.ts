@@ -1,6 +1,6 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import type { ProviderId } from "./registry";
-import { getRegistry, setActiveProvider, setProviderToken } from "./registry";
+import { getRegistry, setActiveProvider, setProviderToken, setPreferredModel } from "./registry";
 
 declare const chrome: any;
 
@@ -13,6 +13,9 @@ const clearTokenBtn = document.getElementById("clear-token") as HTMLButtonElemen
 const revokeLast = document.getElementById("revoke-last") as HTMLButtonElement | null;
 const providerTokenInput = document.getElementById("provider-token") as HTMLInputElement | null;
 const debugInfoBtn = document.getElementById("debug-info") as HTMLButtonElement | null;
+const providerModelInput = document.getElementById("provider-model") as HTMLInputElement | null;
+const saveModelBtn = document.getElementById("save-model") as HTMLButtonElement | null;
+const listModelsBtn = document.getElementById("list-models") as HTMLButtonElement | null;
 
 let pendingSession: SessionRequest | null = null;
 
@@ -31,6 +34,7 @@ async function initProviderUI() {
   const reg = await getRegistry();
   if (providerSelect) providerSelect.value = reg.active || "openai";
   if (providerTokenInput) providerTokenInput.value = reg.tokens?.[reg.active as ProviderId] || "";
+  if (providerModelInput) providerModelInput.value = (reg.prefModels?.[reg.active as ProviderId] || "");
 }
 
 chrome.runtime.onMessage.addListener((msg: any) => {
@@ -148,6 +152,27 @@ clearTokenBtn?.addEventListener("click", async () => {
   const active = (providerSelect?.value || "openai") as ProviderId;
   await setProviderToken(active, undefined);
   alert("Provider key cleared");
+});
+
+saveModelBtn?.addEventListener("click", async () => {
+  const active = (providerSelect?.value || "gemini") as ProviderId;
+  const model = (providerModelInput?.value || "").trim();
+  await setPreferredModel(active, model || undefined);
+  alert(model ? "Preferred model saved" : "Preferred model cleared");
+});
+
+listModelsBtn?.addEventListener("click", async () => {
+  chrome.runtime.sendMessage({ type: "HIVE_LIST_MODELS" }, (resp:any) => {
+    if (resp?.ok) {
+      const names = [
+        ...(Array.isArray(resp.v1?.models) ? resp.v1.models.map((m:any)=>m.name) : []),
+        ...(Array.isArray(resp.v1beta?.models) ? resp.v1beta.models.map((m:any)=>m.name) : []),
+      ];
+      alert(names.length ? names.join("\n") : "No models found for this key");
+    } else {
+      alert("List Models failed: " + (resp?.error || "unknown"));
+    }
+  });
 });
 
 revokeLast?.addEventListener("click", () => {
