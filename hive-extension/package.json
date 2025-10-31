@@ -5,11 +5,16 @@
   "type": "module",
   "scripts": {
     "clean": "rm -rf dist && mkdir -p dist",
-    "build": "npm run clean && esbuild src/background.ts --bundle --platform=browser --outfile=dist/background.js && esbuild src/contentScript.ts --bundle --platform=browser --outfile=dist/contentScript.js && esbuild src/popup.ts --bundle --platform=browser --outfile=dist/popup.js && cp src/popup.html dist/popup.html"
+    "build": "npm run clean && esbuild src/background.ts --bundle --platform=browser --outfile=dist/background.js && esbuild src/contentScript.ts --bundle --platform=browser --outfile=dist/contentScript.js && esbuild src/popup.ts --bundle --platform=browser --outfile=dist/popup.js && cp src/popup.html dist/popup.html",
+    "watch:bg": "esbuild src/background.ts --bundle --platform=browser --outfile=dist/background.js --watch",
+    "watch:cs": "esbuild src/contentScript.ts --bundle --platform=browser --outfile=dist/contentScript.js --watch",
+    "watch:popup": "esbuild src/popup.ts --bundle --platform=browser --outfile=dist/popup.js --watch && cp src/popup.html dist/popup.html",
+    "watch": "npm-run-all -p watch:bg watch:cs watch:popup"
   },
   "devDependencies": {
     "esbuild": "^0.21.5",
     "typescript": "^5.4.0",
-    "@types/chrome": "^0.0.269"
+    "@types/chrome": "^0.0.269",
+    "npm-run-all": "^4.1.5"
   }
 }

@@ -1,7 +1,7 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import { signStringES256 } from "./crypto";
 import { isAllowedOrigin } from "./config";
-import { getRegistry, getPreferredModel, setPreferredModel } from "./registry";
+import { getRegistry, getPreferredModel, setPreferredModel, getProviderToken } from "./registry";
 declare const chrome: any;
 
 const EXT_STORAGE_KEY = "hive_extension_user";
@@ -128,7 +128,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
     (async () => {
       const reg = await getRegistry();
       const active = reg.active;
-      const key = reg.tokens?.[active];
+      const key = (await getProviderToken(active)) || reg.tokens?.[active];
       if (active !== "gemini" || !key) return sendResponse({ ok: false, error: "no_key_or_not_gemini" });
       try {
         const v1 = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`).then(r=>r.json());

@@ -35,10 +35,11 @@ export async function setActiveProvider(p: ProviderId): Promise<void> {
 }
 
 export async function setProviderToken(p: ProviderId, key: string | undefined): Promise<void> {
-  const reg = await getRegistry();
-  reg.tokens = reg.tokens || {};
-  reg.tokens[p] = key || undefined;
-  await setRegistry(reg);
+  const enc = await encryptToken(key);
+  const obj = await new Promise<Record<string, any>>((res)=>chrome.storage.local.get(['hive_provider_tokens_enc'], (i:any)=>res(i||{})));
+  const store = obj['hive_provider_tokens_enc'] || {};
+  if (enc) store[p] = enc; else delete store[p];
+  await new Promise((res)=>chrome.storage.local.set({ hive_provider_tokens_enc: store }, ()=>res(null)));
 }
 
 export async function setPreferredModel(p: ProviderId, model: string | undefined): Promise<void> {
@@ -51,4 +52,58 @@ export async function setPreferredModel(p: ProviderId, model: string | undefined
 export async function getPreferredModel(p: ProviderId): Promise<string | undefined> {
   const reg = await getRegistry();
   return reg.prefModels?.[p];
+}
+
+const VAULT_KEY = 'hive_vault_key_raw';
+
+async function getOrCreateVaultKey(): Promise<CryptoKey> {
+  const raw = await new Promise<string | undefined>((res)=>chrome.storage.local.get([VAULT_KEY], (i:any)=>res(i && i[VAULT_KEY])));
+  if (raw) {
+    const buf = base64urlToBuffer(raw);
+    return crypto.subtle.importKey('raw', buf, { name: 'AES-GCM' }, false, ['encrypt','decrypt']);
+  }
+  const k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt','decrypt']);
+  const exported = new Uint8Array(await crypto.subtle.exportKey('raw', k));
+  await new Promise((res)=>chrome.storage.local.set({ [VAULT_KEY]: bufferToBase64url(exported) }, ()=>res(null)));
+  return k;
+}
+
+function bufferToBase64url(buf: ArrayBuffer | Uint8Array): string {
+  const arr = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let b = '';
+  for (let i=0;i<arr.length;i++) b += String.fromCharCode(arr[i]);
+  return btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'');
+}
+
+function base64urlToBuffer(s: string): ArrayBuffer {
+  const pad = s.length % 4 === 2 ? '==' : s.length % 4 === 3 ? '=' : '';
+  const bin = atob(s.replace(/-/g,'+').replace(/_/g,'/') + pad);
+  const arr = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return arr.buffer;
+}
+
+async function encryptToken(value?: string): Promise<string | undefined> {
+  if (!value) return undefined;
+  const key = await getOrCreateVaultKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(value));
+  return bufferToBase64url(iv) + '.' + bufferToBase64url(ct);
+}
+
+async function decryptToken(enc?: string): Promise<string | undefined> {
+  if (!enc) return undefined;
+  const [ivB64, ctB64] = enc.split('.');
+  if (!ivB64 || !ctB64) return undefined;
+  const key = await getOrCreateVaultKey();
+  const iv = new Uint8Array(base64urlToBuffer(ivB64));
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, base64urlToBuffer(ctB64));
+  return new TextDecoder().decode(pt);
+}
+
+export async function getProviderToken(p: ProviderId): Promise<string | undefined> {
+  const obj = await new Promise<Record<string, any>>((res)=>chrome.storage.local.get(['hive_provider_tokens_enc'], (i:any)=>res(i||{})));
+  const store = obj['hive_provider_tokens_enc'] || {};
+  const enc = store[p];
+  return decryptToken(enc);
 }
