@@ -1,4 +1,4 @@
-import type { SessionRequest, ClientSignedToken } from "./types";
+  import type { SessionRequest, ClientSignedToken } from "./types";
 import { signStringES256 } from "./crypto";
 import { isAllowedOrigin } from "./config";
 import { getRegistry, getPreferredModel, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile, setProviderToken, getUserProfile, getUseWebSession } from "./registry";
@@ -17,15 +17,15 @@ async function getStoredUser(): Promise<any | null> {
 
 // Context menu: Enable Hive on this site
 try {
-  chrome.runtime.onInstalled.addListener(()=>{
-    try { chrome.contextMenus.create({ id:'hive-enable-site', title:'Enable Hive on this site', contexts:['action','page'] }); } catch {}
+  chrome.runtime.onInstalled.addListener(() => {
+    try { chrome.contextMenus.create({ id: 'hive-enable-site', title: 'Enable Hive on this site', contexts: ['action', 'page'] }); } catch {}
   });
-  chrome.contextMenus.onClicked.addListener((info:any, tab:any)=>{
-    if (info && info.menuItemId === 'hive-enable-site' && tab && tab.url){
+  chrome.contextMenus.onClicked.addListener((info: any, tab: any) => {
+    if (info && info.menuItemId === 'hive-enable-site' && tab && tab.url) {
       try {
         const u = new URL(tab.url);
         const originPat = `${u.protocol}//${u.hostname}/*`;
-        chrome.permissions.request({ origins: [originPat] }, (granted:boolean)=>{
+        chrome.permissions.request({ origins: [originPat] }, (granted: boolean) => {
           if (granted) { try { injectScript(tab.id); } catch {} }
         });
       } catch {}
@@ -35,7 +35,7 @@ try {
 
 // Larry step: auto-inject content script on allowed sites when page reading is enabled
 async function isPageReadEnabled(): Promise<boolean> {
-  return new Promise((res)=> chrome.storage.local.get(['hive_allow_page_read'], (i:any)=> res(!!i['hive_allow_page_read'])));
+  return new Promise((res) => chrome.storage.local.get(['hive_allow_page_read'], (i: any) => res(!!i['hive_allow_page_read'])));
 }
 function originPatternFromUrl(u?: string): string | null {
   try {
@@ -46,14 +46,14 @@ function originPatternFromUrl(u?: string): string | null {
   } catch { return null; }
 }
 async function hasOriginPermission(originPat: string): Promise<boolean> {
-  return new Promise((res)=>{
-    try { chrome.permissions.contains({ origins: [originPat] }, (g:boolean)=> res(!!g)); } catch { res(false); }
+  return new Promise((res) => {
+    try { chrome.permissions.contains({ origins: [originPat] }, (g: boolean) => res(!!g)); } catch { res(false); }
   });
 }
-function injectScript(tabId: number){
+function injectScript(tabId: number) {
   try { chrome.scripting.executeScript({ target: { tabId }, files: ['dist/contentScript.js'] }); } catch {}
 }
-async function maybeInjectForTab(tabId?: number, url?: string){
+async function maybeInjectForTab(tabId?: number, url?: string) {
   try {
     if (!tabId || !url) return;
     const on = await isPageReadEnabled();
@@ -72,81 +72,81 @@ function parseSuggestions(text: string, nMax: number = 3): string[] {
     if (!text) return [];
     let parts: string[] = [];
     if (text.includes('\n---\n')) parts = text.split(/\n---\n/g);
-    else if (/^\s*[-*]/m.test(text)) parts = text.split(/\n\s*[-*]\s+/g).map((s)=>s.trim()).filter(Boolean);
+    else if (/^\s*[-*]/m.test(text)) parts = text.split(/\n\s*[-*]\s+/g).map((s) => s.trim()).filter(Boolean);
     else parts = text.split(/\n\n+/g);
-    return parts.map((s)=>s.trim()).filter(Boolean).slice(0, Math.max(1, Math.min(5, nMax)));
+    return parts.map((s) => s.trim()).filter(Boolean).slice(0, Math.max(1, Math.min(5, nMax)));
   } catch { return []; }
 }
 
 try {
-  chrome.tabs.onUpdated.addListener((tabId:number, change:any, tab:any)=>{
+  chrome.tabs.onUpdated.addListener((tabId: number, change: any, tab: any) => {
     if (change && change.status === 'complete') { void maybeInjectForTab(tabId, tab?.url); }
   });
 } catch {}
 try {
-  chrome.tabs.onActivated.addListener((info:any)=>{
-    try { chrome.tabs.get(info.tabId, (t:any)=>{ void maybeInjectForTab(info.tabId, t?.url); }); } catch {}
+  chrome.tabs.onActivated.addListener((info: any) => {
+    try { chrome.tabs.get(info.tabId, (t: any) => { void maybeInjectForTab(info.tabId, t?.url); }); } catch {}
   });
 } catch {}
 
 // Build thread history with timestamps
-async function buildThreadHistory(take: number = 30): Promise<Array<{ ts:number; role:'user'|'assistant'; content:string }>>{
+async function buildThreadHistory(take: number = 30): Promise<Array<{ ts: number; role: 'user' | 'assistant'; content: string }>> {
   try {
-    const items: any[] = await new Promise((res)=>{ chrome.storage.local.get(['hive_memory'], (i:any)=> res(Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : [])); });
+    const items: any[] = await new Promise((res) => { chrome.storage.local.get(['hive_memory'], (i: any) => res(Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : [])); });
     const mapped = items
-      .filter((e:any)=> typeof e?.text === 'string' || typeof e?.data?.text === 'string')
-      .map((e:any)=>{
-        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g,' ').trim();
-        const role: 'user'|'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
+      .filter((e: any) => typeof e?.text === 'string' || typeof e?.data?.text === 'string')
+      .map((e: any) => {
+        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g, ' ').trim();
+        const role: 'user' | 'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
         const ts = typeof e?.ts === 'number' ? e.ts : Date.now();
         return { ts, role, content: txt };
       })
-      .filter((m)=> m.content)
-      .sort((a,b)=> a.ts - b.ts);
+      .filter((m) => m.content)
+      .sort((a, b) => a.ts - b.ts);
     return mapped.slice(-Math.max(2, Math.min(100, take)));
   } catch { return []; }
 }
 
-async function sha256Hex(s: string): Promise<string>{
+async function sha256Hex(s: string): Promise<string> {
   try {
     // @ts-ignore
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
   } catch {
     // Fallback: poor-man hash
-    let h = 0; for (let i=0;i<s.length;i++){ h = ((h<<5)-h) + s.charCodeAt(i); h |= 0; }
-    return 'x'+(h>>>0).toString(16);
+    let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
+    return 'x' + (h >>> 0).toString(16);
   }
 }
 
-async function computeStateHash(): Promise<string>{
+async function computeStateHash(): Promise<string> {
   const persona = await getPersonaProfile();
   const hist = await buildThreadHistory(40);
   const base = JSON.stringify({
-    persona: { name: persona?.name||'', tone: persona?.tone||{}, keywords: persona?.keywords||'' },
-    history: hist.map(m=> ({ r:m.role, c:m.content }))
+    persona: { name: persona?.name || '', tone: persona?.tone || {}, keywords: persona?.keywords || '' },
+    history: hist.map(m => ({ r: m.role, c: m.content }))
   });
   return sha256Hex(base);
 }
 
 type OriginClocks = Record<string, { lastUserTs?: number; lastAssistantTs?: number }>;
-type Vault = { persona:any; lastConversationHash:string; lastMessage:string; threadHistory:Array<{ts:number;role:'user'|'assistant';content:string}>; syncTimestamp:number; perOriginClocks?: OriginClocks };
-async function getVault(): Promise<Vault|null>{
-  return new Promise((res)=> chrome.storage.local.get(['hive_vault'], (i:any)=> res(i?.['hive_vault'] || null)));
+type Vault = { persona: any; lastConversationHash: string; lastMessage: string; threadHistory: Array<{ ts: number; role: 'user' | 'assistant'; content: string }>; syncTimestamp: number; perOriginClocks?: OriginClocks };
+async function getVault(): Promise<Vault | null> {
+  return new Promise((res) => chrome.storage.local.get(['hive_vault'], (i: any) => res(i?.['hive_vault'] || null)));
 }
-async function setVault(v: Vault): Promise<void>{
-  return new Promise((res)=> chrome.storage.local.set({ hive_vault: v, hive_last_state_hash: v.lastConversationHash }, ()=> res()))
+async function setVault(v: Vault): Promise<void> {
+  return new Promise((res) => chrome.storage.local.set({ hive_vault: v, hive_last_state_hash: v.lastConversationHash }, () => res()))
 }
-async function getOriginClocks(): Promise<OriginClocks>{
-  return new Promise((res)=> chrome.storage.local.get(['hive_origin_clocks'], (i:any)=> res((i && i['hive_origin_clocks']) || {})));
+async function getOriginClocks(): Promise<OriginClocks> {
+  return new Promise((res) => chrome.storage.local.get(['hive_origin_clocks'], (i: any) => res((i && i['hive_origin_clocks']) || {})));
 }
-async function setOriginClocks(c: OriginClocks): Promise<void>{
-  return new Promise((res)=> chrome.storage.local.set({ hive_origin_clocks: c }, ()=> res()));
+async function setOriginClocks(c: OriginClocks): Promise<void> {
+  return new Promise((res) => chrome.storage.local.set({ hive_origin_clocks: c }, () => res()));
 }
-async function refreshVault(): Promise<Vault>{
+async function refreshVault(): Promise<Vault> {
   const persona = await getPersonaProfile();
   const history = await buildThreadHistory(60);
-  const lastMessage = history.length ? history[history.length-1].content : '';
+  const lastMessage = history.length ? history[history.length - 1].content : '';
   const lastConversationHash = await computeStateHash();
   const clocks = await getOriginClocks();
   const v: Vault = { persona, lastConversationHash, lastMessage, threadHistory: history, syncTimestamp: Date.now(), perOriginClocks: clocks };
@@ -155,35 +155,35 @@ async function refreshVault(): Promise<Vault>{
 }
 
 // Convert local memory events into chat messages (user/assistant), oldest-first
-async function buildMemoryMessages(take: number = 12): Promise<Array<{ role: 'user'|'assistant', content: string }>> {
+async function buildMemoryMessages(take: number = 12): Promise<Array<{ role: 'user' | 'assistant', content: string }>> {
   try {
-    const items: any[] = await new Promise((res)=>{
-      chrome.storage.local.get(['hive_memory'], (i:any)=> res(Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : []));
+    const items: any[] = await new Promise((res) => {
+      chrome.storage.local.get(['hive_memory'], (i: any) => res(Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : []));
     });
     const mapped = items
-      .filter((e:any)=> typeof e?.text === 'string' || typeof e?.data?.text === 'string')
-      .map((e:any)=>{
-        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g,' ').trim();
-        const role: 'user'|'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
+      .filter((e: any) => typeof e?.text === 'string' || typeof e?.data?.text === 'string')
+      .map((e: any) => {
+        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g, ' ').trim();
+        const role: 'user' | 'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
         const ts = typeof e?.ts === 'number' ? e.ts : 0;
         return { ts, role, content: txt };
       })
-      .filter((m)=> m.content)
-      .sort((a,b)=> a.ts - b.ts);
+      .filter((m) => m.content)
+      .sort((a, b) => a.ts - b.ts);
     const last = mapped.slice(-Math.max(2, Math.min(40, take)));
-    return last.map(({ role, content })=> ({ role, content }));
+    return last.map(({ role, content }) => ({ role, content }));
   } catch { return []; }
 }
 
 // Build a concise memory summary from local ring buffer
 async function buildMemorySummary(): Promise<string> {
   try {
-    const joined: string = await new Promise((res)=>{
-      chrome.storage.local.get(['hive_memory'], (i:any)=>{
+    const joined: string = await new Promise((res) => {
+      chrome.storage.local.get(['hive_memory'], (i: any) => {
         const arr: any[] = Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : [];
         const last = arr.slice(-8).reverse();
-        const texts = last.map((e:any)=> typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).filter(Boolean);
-        const norm = texts.map((t:string)=> t.replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,3).map((s:string)=> s.slice(0,90));
+        const texts = last.map((e: any) => typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).filter(Boolean);
+        const norm = texts.map((t: string) => t.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 3).map((s: string) => s.slice(0, 90));
         res(norm.join(' | '));
       });
     });
@@ -193,45 +193,45 @@ async function buildMemorySummary(): Promise<string> {
   }
 }
 
-function openPopupSafe(){
+function openPopupSafe() {
   try {
     const r = chrome.action.openPopup();
-    if (r && typeof r.catch === 'function') r.catch(()=>{});
+    if (r && typeof r.catch === 'function') r.catch(() => { });
   } catch {}
 }
 async function ensureProviderTab(provider: string): Promise<number | null> {
   const existing = await findProviderTabs(provider);
   if (existing.length) return existing[0].id;
   const url = provider === 'openai' ? 'https://chatgpt.com/' :
-              provider === 'claude' ? 'https://claude.ai/' :
-              provider === 'grok' ? 'https://x.ai/' :
-              provider === 'gemini' ? 'https://gemini.google.com/' :
-              provider === 'deepseek' ? 'https://deepseek.com/' : '';
+    provider === 'claude' ? 'https://claude.ai/' :
+      provider === 'grok' ? 'https://x.ai/' :
+        provider === 'gemini' ? 'https://gemini.google.com/' :
+          provider === 'deepseek' ? 'https://deepseek.com/' : '';
   if (!url) return null;
-  return new Promise((res)=>{
-    try { chrome.tabs.create({ url, active: false }, (t:any)=> res((t && t.id) || null)); } catch { res(null); }
+  return new Promise((res) => {
+    try { chrome.tabs.create({ url, active: false }, (t: any) => res((t && t.id) || null)); } catch { res(null); }
   });
 }
 
 // Provider proxy plumbing (page-session fetch)
 const proxyWaiters = new Map<string, (payload: any) => void>();
-function randomId(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+function randomId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 async function findProviderTabs(provider: string): Promise<Array<{ id: number, url?: string }>> {
   const patterns: string[] =
-    provider === 'openai' ? ['*://chatgpt.com/*','*://*.openai.com/*'] :
-    provider === 'claude' ? ['*://claude.ai/*'] :
-    provider === 'grok' ? ['*://x.ai/*'] :
-    provider === 'gemini' ? ['*://gemini.google.com/*','*://*.google.com/*'] :
-    provider === 'deepseek' ? ['*://deepseek.com/*','*://*.deepseek.com/*'] :
-    [];
-  return new Promise((res)=>{
+    provider === 'openai' ? ['*://chatgpt.com/*', '*://*.openai.com/*'] :
+      provider === 'claude' ? ['*://claude.ai/*'] :
+        provider === 'grok' ? ['*://x.ai/*'] :
+          provider === 'gemini' ? ['*://gemini.google.com/*', '*://*.google.com/*'] :
+            provider === 'deepseek' ? ['*://deepseek.com/*', '*://*.deepseek.com/*'] :
+              [];
+  return new Promise((res) => {
     if (!patterns.length) return res([]);
-    const out: Array<{id:number,url?:string}> = [];
-    chrome.tabs.query({}, (tabs:any[])=>{
-      for (const t of tabs){
+    const out: Array<{ id: number, url?: string }> = [];
+    chrome.tabs.query({}, (tabs: any[]) => {
+      for (const t of tabs) {
         const u = (t.url || '') as string;
-        if (patterns.some(p=>{
-          const re = new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\\*/g,'.*') + '$');
+        if (patterns.some(p => {
+          const re = new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*') + '$');
           return re.test(u);
         })) out.push({ id: t.id, url: t.url });
       }
@@ -240,16 +240,16 @@ async function findProviderTabs(provider: string): Promise<Array<{ id: number, u
   });
 }
 function sendViaTab(tabId: number, url: string, init: RequestInit, allowedOrigins: string[]): Promise<any> {
-  return new Promise((res)=>{
+  return new Promise((res) => {
     const id = randomId();
-    proxyWaiters.set(id, (payload:any)=>{ res(payload); });
-    chrome.tabs.sendMessage(tabId, { type: 'HIVE_PROVIDER_PROXY', payload: { id, url, init, allowedOrigins } }, ()=>{
+    proxyWaiters.set(id, (payload: any) => { res(payload); });
+    chrome.tabs.sendMessage(tabId, { type: 'HIVE_PROVIDER_PROXY', payload: { id, url, init, allowedOrigins } }, () => {
       // ignore lastError if no direct response, we wait for RESULT
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       chrome.runtime.lastError;
     });
-    setTimeout(()=>{
-      if (proxyWaiters.has(id)) { proxyWaiters.delete(id); res({ ok:false, error:'proxy_timeout' }); }
+    setTimeout(() => {
+      if (proxyWaiters.has(id)) { proxyWaiters.delete(id); res({ ok: false, error: 'proxy_timeout' }); }
     }, 10000);
   });
 }
@@ -267,7 +267,6 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
     clearTimeout(t);
   }
 }
- 
 
 function mapOpenAIToClaudeBody(req: any): { model: string; messages: any[]; max_tokens: number } {
   let model: string = typeof req?.model === "string" && req.model.startsWith("claude") ? req.model : "claude-3-5-sonnet-latest";
@@ -347,51 +346,51 @@ function makeIconImageData(size: number): ImageData | null {
     if (!ctx) return null;
     // Background
     ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(0,0,size,size);
+    ctx.fillRect(0, 0, size, size);
     // Gold accents
     const gold = '#d4af37';
     // Bee stripes
     ctx.fillStyle = gold;
-    for (let i=0;i<3;i++){
-      const y = Math.floor(size*(0.30 + i*0.15));
-      ctx.fillRect(Math.floor(size*0.12), y, Math.floor(size*0.76), Math.floor(size*0.06));
+    for (let i = 0; i < 3; i++) {
+      const y = Math.floor(size * (0.30 + i * 0.15));
+      ctx.fillRect(Math.floor(size * 0.12), y, Math.floor(size * 0.76), Math.floor(size * 0.06));
     }
     // Brain swirl (arc)
     ctx.strokeStyle = gold;
-    ctx.lineWidth = Math.max(1, Math.floor(size*0.06));
+    ctx.lineWidth = Math.max(1, Math.floor(size * 0.06));
     ctx.beginPath();
-    ctx.arc(size*0.5, size*0.45, size*0.22, 0.8*Math.PI, 1.9*Math.PI);
+    ctx.arc(size * 0.5, size * 0.45, size * 0.22, 0.8 * Math.PI, 1.9 * Math.PI);
     ctx.stroke();
     // Small hex (honeycomb)
-    function hex(cx:number, cy:number, r:number){
+    function hex(cx: number, cy: number, r: number) {
       ctx.beginPath();
-      for (let k=0;k<6;k++){
-        const a = (Math.PI/3)*k;
-        const x = cx + r*Math.cos(a);
-        const y = cy + r*Math.sin(a);
-        if (k===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      for (let k = 0; k < 6; k++) {
+        const a = (Math.PI / 3) * k;
+        const x = cx + r * Math.cos(a);
+        const y = cy + r * Math.sin(a);
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.closePath();
     }
-    ctx.lineWidth = Math.max(1, Math.floor(size*0.03));
-    hex(size*0.78, size*0.26, size*0.10);
+    ctx.lineWidth = Math.max(1, Math.floor(size * 0.03));
+    hex(size * 0.78, size * 0.26, size * 0.10);
     ctx.stroke();
     // Glow
     ctx.shadowColor = gold;
-    ctx.shadowBlur = Math.max(2, Math.floor(size*0.1));
+    ctx.shadowBlur = Math.max(2, Math.floor(size * 0.1));
     ctx.fillStyle = 'rgba(212,175,55,0.15)';
-    ctx.beginPath(); ctx.arc(size*0.5, size*0.5, size*0.38, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(size * 0.5, size * 0.5, size * 0.38, 0, Math.PI * 2); ctx.fill();
     // Export
-    const img = ctx.getImageData(0,0,size,size);
+    const img = ctx.getImageData(0, 0, size, size);
     return img;
   } catch { return null; }
 }
 
-function setActionIcons(){
+function setActionIcons() {
   try {
-    const sizes = [16,32,48,128];
+    const sizes = [16, 32, 48, 128];
     const dict: Record<string, ImageData> = {} as any;
-    for (const s of sizes){
+    for (const s of sizes) {
       const img = makeIconImageData(s);
       if (img) dict[String(s)] = img;
     }
@@ -402,12 +401,31 @@ function setActionIcons(){
 // Heartbeat for sync worker
 try { chrome.alarms.create('hive_sync_heartbeat', { periodInMinutes: 1 }); } catch {}
 try {
-  chrome.alarms.onAlarm.addListener((a:any)=>{ if (a && a.name === 'hive_sync_heartbeat') { try { void refreshVault(); } catch {} } });
+  chrome.alarms.onAlarm.addListener((a: any) => { if (a && a.name === 'hive_sync_heartbeat') { try { void refreshVault(); } catch {} } });
 } catch {}
 
 chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (resp: any) => void) => {
   // Ensure icon set when background activates
   setActionIcons();
+  if (msg?.type === 'HIVE_CHECK_CONN') {
+    (async () => {
+      try {
+        const reg = await getRegistry();
+        const active = reg.active;
+        const key = active ? await getProviderToken(active) : undefined;
+        const webEnabled = active ? await getUseWebSession(active) : false;
+        let webTabs = 0;
+        try {
+          if (webEnabled && active) {
+            const tabs = await findProviderTabs(active);
+            webTabs = tabs.length;
+          }
+        } catch {}
+        return sendResponse({ ok: true, active, hasKey: !!key, webEnabled: !!webEnabled, webTabs });
+      } catch (e) { return sendResponse({ ok: false, error: String(e) }); }
+    })();
+    return true;
+  }
   if (msg?.type === 'HIVE_PROVIDER_PROXY_RESULT') {
     const id = msg?.payload?.id;
     if (id && proxyWaiters.has(id)) {
@@ -749,12 +767,19 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
               mapped.contents = contents;
             }
             const useWeb = await getUseWebSession('gemini');
+            // Clamp contents to avoid oversized payloads causing timeouts
+            const clampText = (s:string)=> String(s||'').slice(0, 1200);
+            const clampContents = (arr:any[], maxMsgs:number)=>{
+              const take = Array.isArray(arr) ? arr.slice(-Math.max(2, Math.min(12, maxMsgs))) : [];
+              return take.map((c:any)=> ({ role: c.role==='model'?'model':'user', parts: Array.isArray(c.parts) ? c.parts.map((p:any)=> (p?.text ? { text: clampText(p.text) } : p)).filter(Boolean) : [] }));
+            };
+            const contentsClamped = clampContents(mapped.contents, 8);
             const toText = (data:any)=>{ const parts = data?.candidates?.[0]?.content?.parts || []; return parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n'); };
             if (useWeb) {
               const tabs = await findProviderTabs('gemini');
               if (tabs.length) {
                 const u = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
-                const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ contents: mapped.contents }) }, []);
+                const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ contents: contentsClamped, generationConfig: { temperature: 0.7, candidateCount: 1, maxOutputTokens: 1024 } }) }, []);
                 if (r && r.ok) return sendResponse({ ok:true, text: toText(r.data), raw: r.data, via:'web_session' });
                 return sendResponse({ ok:false, error: r?.error || 'web_session_failed' });
               }
@@ -768,8 +793,35 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
               const url = isOAuth ? base : `${base}?key=${encodeURIComponent(token)}`;
               const headers: Record<string,string> = { 'Content-Type': 'application/json' };
               if (isOAuth) headers['Authorization'] = `Bearer ${token}`;
-              const { resp, json } = await fetchJsonWithTimeout(url, { method:'POST', headers, body: JSON.stringify({ contents: mapped.contents }) }, 12000);
-              return sendResponse({ ok: resp.ok, text: toText(json), raw: json, status: resp.status });
+              try {
+                const { resp, json } = await fetchJsonWithTimeout(url, { method:'POST', headers, body: JSON.stringify({ contents: contentsClamped, generationConfig: { temperature: 0.7, candidateCount: 1, maxOutputTokens: 1024 } }) }, 25000);
+                const textOut = toText(json);
+                if (!resp.ok) {
+                  const shouldFallback = resp.status === 404 || resp.status === 400 || resp.status === 403;
+                  if (!shouldFallback) {
+                    const errMsg = (json && (json.error?.message || json.message)) || (textOut ? textOut.slice(0,200) : 'gemini_request_failed');
+                    return sendResponse({ ok: false, error: errMsg, status: resp.status, raw: json });
+                  }
+                  // v1 error - try v1beta
+                  throw new Error('try_v1beta');
+                }
+                return sendResponse({ ok: true, text: textOut, raw: json, status: resp.status });
+              } catch (e) {
+                // Fallback to v1beta on timeout/abort or explicit signal
+                try {
+                  const base2 = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(mapped.model)}:generateContent`;
+                  const url2 = isOAuth ? base2 : `${base2}?key=${encodeURIComponent(token)}`;
+                  const { resp: resp2, json: json2 } = await fetchJsonWithTimeout(url2, { method:'POST', headers, body: JSON.stringify({ contents: contentsClamped, generationConfig: { temperature: 0.7, candidateCount: 1, maxOutputTokens: 1024 } }) }, 25000);
+                  const textOut2 = toText(json2);
+                  if (!resp2.ok) {
+                    const errMsg2 = (json2 && (json2.error?.message || json2.message)) || (textOut2 ? textOut2.slice(0,200) : 'gemini_request_failed');
+                    return sendResponse({ ok: false, error: errMsg2, status: resp2.status, raw: json2 });
+                  }
+                  return sendResponse({ ok: true, text: textOut2, raw: json2, status: resp2.status, via: 'v1beta_fallback' });
+                } catch (e2) {
+                  return sendResponse({ ok:false, error: String(e2).includes('AbortError') ? 'Gemini request timed out' : String(e2) });
+                }
+              }
             }
             return sendResponse({ ok:false, error:'no_provider_key' });
           } catch (e) { return sendResponse({ ok:false, error:String(e) }); }

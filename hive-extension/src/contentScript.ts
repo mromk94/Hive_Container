@@ -108,6 +108,7 @@ chrome.runtime.onMessage.addListener((msg: any) => {
   }
   if (msg?.type === 'HIVE_SCRAPE_THREAD') {
     try {
+      try { console.debug('[Hive] scrape request received'); } catch {}
       const host = location.hostname;
       const take = Math.max(2, Math.min(20, Number(msg?.payload?.take || 12)));
       const out: Array<{ role: 'user'|'assistant', content: string }> = [];
@@ -128,13 +129,20 @@ chrome.runtime.onMessage.addListener((msg: any) => {
           push(role, text);
         }
       } else if (/gemini\.google\.com$/.test(host)) {
-        // Best-effort Gemini selectors
-        const chat = document.querySelector('[aria-live="polite"], main') || document.body;
-        const items = Array.from(chat.querySelectorAll('[role="listitem"], article, div[aria-label]')) as HTMLElement[];
-        const last = items.slice(-take);
-        for (const el of last){
-          const who = (el.getAttribute('data-source') || el.getAttribute('aria-label') || '').toLowerCase();
-          const role = /user|you/.test(who) ? 'user' : 'assistant';
+        // Hardened Gemini selectors with graceful fallback
+        const chat = document.querySelector('main, [role="main"], [aria-live="polite"]') || document.body;
+        let items = Array.from(chat.querySelectorAll('[data-message-author-role], [role="listitem"], article, div[aria-label], [data-qa*="message" i], [data-qa*="response" i]')) as HTMLElement[];
+        // prefer elements that have some visible text
+        items = items.filter(el => ((el.innerText || el.textContent || '').trim()).length > 0);
+        let taken = items.slice(-take);
+        if (!taken.length) {
+          // Fallback to generic blocks in main
+          const generic = Array.from((document.querySelector('main')||document.body).querySelectorAll('p,li,article,section')).filter((el:Element)=> ((el as HTMLElement).innerText||'').trim().length>0) as HTMLElement[];
+          taken = generic.slice(-take);
+        }
+        for (const el of taken){
+          const whoAttr = (el.getAttribute('data-message-author-role') || el.getAttribute('data-source') || el.getAttribute('aria-label') || '').toLowerCase();
+          const role = /user|you/.test(whoAttr) ? 'user' : 'assistant';
           const text = (el.innerText || el.textContent || '').trim();
           push(role, text);
         }

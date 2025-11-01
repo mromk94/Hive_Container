@@ -184,7 +184,13 @@ importBtn?.addEventListener('click', ()=>{
         const pickAndSend = (ts:any[])=>{
           if (!ts || !ts.length) return false;
           const id = ts[0].id;
-          try { chrome.tabs.sendMessage(id, { type:'HIVE_SCRAPE_THREAD', payload: { take: 12 } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {}
+          try {
+            // Ensure content script is present, then send scrape request
+            chrome.scripting.executeScript({ target: { tabId: id }, files: ['dist/contentScript.js'] }, ()=>{
+              try { chrome.runtime.lastError; } catch {}
+              try { chrome.tabs.sendMessage(id, { type:'HIVE_SCRAPE_THREAD', payload: { take: 12 } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {}
+            });
+          } catch {}
           return true;
         };
         if (pickAndSend(tabs)) return;
@@ -555,9 +561,10 @@ savePersonaBtn?.addEventListener("click", async () => {
 async function initProviderUI() {
   const reg = await getRegistry();
   if (providerSelect) providerSelect.value = reg.active || "openai";
-  if (providerTokenInput) providerTokenInput.value = reg.tokens?.[reg.active as ProviderId] || "";
-  // Reflect encrypted token presence
+  // Load decrypted token from secure storage to reflect presence in UI
   const existing = await getProviderToken(reg.active as ProviderId);
+  if (providerTokenInput) providerTokenInput.value = existing || "";
+  // Reflect encrypted token presence
   if (secureStatus) secureStatus.textContent = existing ? "Stored securely" : "Not saved";
   if (providerModelInput) providerModelInput.value = (reg.prefModels?.[reg.active as ProviderId] || "");
   updateTokenLabel();
@@ -834,9 +841,8 @@ setSample.addEventListener("click", () => {
 providerSelect?.addEventListener("change", async () => {
   const active = providerSelect!.value as ProviderId;
   await setActiveProvider(active);
-  const reg = await getRegistry();
-  if (providerTokenInput) providerTokenInput.value = reg.tokens?.[active as ProviderId] || "";
   const existing = await getProviderToken(active);
+  if (providerTokenInput) providerTokenInput.value = existing || "";
   if (secureStatus) secureStatus.textContent = existing ? "Stored securely" : "Not saved";
   updateTokenLabel();
   try {
