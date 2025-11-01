@@ -10,6 +10,7 @@
     "scripting",
     "tabs",
     "notifications",
+    "contextMenus",
     "identity"
   ],
   "host_permissions": [
@@ -26,7 +27,19 @@
     "https://gemini.google.com/*",
     "https://*.google.com/*",
     "https://deepseek.com/*",
-    "https://*.deepseek.com/*"
+    "https://*.deepseek.com/*",
+    "https://copilot.microsoft.com/*",
+    "https://*.bing.com/*",
+    "https://grok.com/*",
+    "https://elevenlabs.io/*",
+    "https://*.elevenlabs.io/*",
+    "https://www.canva.com/*",
+    "https://*.canva.com/*",
+    "https://meta.ai/*",
+    "https://www.meta.ai/*",
+    "https://github.com/*",
+    "https://*.github.com/*",
+    "https://new-frontend-irt9943l2-adolphuslarrygmailcoms-projects.vercel.app/*"
   ],
   "optional_host_permissions": [
     "https://chatgpt.com/*",
@@ -36,7 +49,9 @@
     "https://gemini.google.com/*",
     "https://*.google.com/*",
     "https://deepseek.com/*",
-    "https://*.deepseek.com/*"
+    "https://*.deepseek.com/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "background": { "service_worker": "dist/background.js" },
   "action": { "default_popup": "dist/popup.html", "default_title": "Hive Container" },
@@ -54,10 +69,24 @@
         "https://gemini.google.com/*",
         "https://*.google.com/*",
         "https://deepseek.com/*",
-        "https://*.deepseek.com/*"
+        "https://*.deepseek.com/*",
+        "https://copilot.microsoft.com/*",
+        "https://*.bing.com/*",
+        "https://grok.com/*",
+        "https://elevenlabs.io/*",
+        "https://*.elevenlabs.io/*",
+        "https://www.canva.com/*",
+        "https://*.canva.com/*",
+        "https://meta.ai/*",
+        "https://www.meta.ai/*",
+        "https://github.com/*",
+        "https://*.github.com/*",
+        "https://new-frontend-irt9943l2-adolphuslarrygmailcoms-projects.vercel.app/*"
       ],
       "js": ["dist/contentScript.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
     }
   ],
   "web_accessible_resources": [

@@ -106,3 +106,20 @@
 - 01:46 Assistant Capture: MutationObserver for OpenAI; later extended to Gemini and Claude heuristics; dedupe by trimmed key.
 - 01:50 Loop Guard: Hash-based dedupe for persona and recent context prefaces (per-origin last hash in storage + window cache).
 - 01:55 Build: npm run build succeeded (background/contentScript/popup bundles updated).
+
+- 03:05 UI: On-page bubble refined (pill group, blur backdrop) with overlap avoidance.
+- 03:08 Behavior: Added "Auto-hydrate on focus" toggle and page-side focus sync via HIVE_SYNC.
+- 03:12 Vision: Added "Allow page reading (vision)" toggle. When ON, requests optional host permission for current origin and injects content script.
+- 03:14 Read Button: Added "Read" in on-page bubble to inject Deep Page Context (title, selection, summary of text blocks, and images: alt/caption/src), with hash dedupe.
+- 03:16 Suggest Flow: When page reading is allowed, suggestions prepend SYSTEM page snapshot automatically.
+- 03:18 Manifest: Expanded optional_host_permissions to http(s)://*/* for per-site opt-in; kept content_script matches narrow. Uses chrome.scripting.executeScript on grant.
+- 03:20 Mobile Bridge: Added window.postMessage relays HIVE_MOBILE_SYNC/PULL/RECORD to support external mobile surfaces.
+- 05:20 Chat UX: Multiline composer (Shift+Enter newline), Output format selector (Plain/Markdown/HTML), markdown/html rendering with sanitization.
+- 05:28 Dock: Added right-side expandable dock with iframe to popup; persisted width and open state; viewport-aware clamping.
+- 05:34 Popup: Auto-detect embedded and switch to responsive full-height layout (flex chat + sticky composer).
+- 05:38 Compact UI: Consolidated floating controls into single side tab with compact action menu; hid banner/bubble by default.
+- 05:45 Detection: Added manual “Rescan AI” and visual cue (tab glow) when AI detected.
+- 05:52 Manifest: Added host_permissions and content_script matches for copilot.microsoft.com, *.bing.com, grok.com, elevenlabs.io, *.elevenlabs.io, www/meta.ai, www/*.canva.com.
+- 05:58 Manifest (more): Added github.com, *.github.com, and new-frontend-irt9943l2-adolphuslarrygmailcoms-projects.vercel.app.
+- 05:59 ContentScript: Console debug on injection; expanded knownHosts list accordingly.
+- 06:00 Build: npm run build succeeded (background/contentScript/popup bundles updated). Reload extension to test.

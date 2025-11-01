@@ -15,6 +15,80 @@ async function getStoredUser(): Promise<any | null> {
   return new Promise((res) => chrome.storage.local.get([EXT_STORAGE_KEY], (items: Record<string, any>) => res(items[EXT_STORAGE_KEY] ?? null)));
 }
 
+// Context menu: Enable Hive on this site
+try {
+  chrome.runtime.onInstalled.addListener(()=>{
+    try { chrome.contextMenus.create({ id:'hive-enable-site', title:'Enable Hive on this site', contexts:['action','page'] }); } catch {}
+  });
+  chrome.contextMenus.onClicked.addListener((info:any, tab:any)=>{
+    if (info && info.menuItemId === 'hive-enable-site' && tab && tab.url){
+      try {
+        const u = new URL(tab.url);
+        const originPat = `${u.protocol}//${u.hostname}/*`;
+        chrome.permissions.request({ origins: [originPat] }, (granted:boolean)=>{
+          if (granted) { try { injectScript(tab.id); } catch {} }
+        });
+      } catch {}
+    }
+  });
+} catch {}
+
+// Larry step: auto-inject content script on allowed sites when page reading is enabled
+async function isPageReadEnabled(): Promise<boolean> {
+  return new Promise((res)=> chrome.storage.local.get(['hive_allow_page_read'], (i:any)=> res(!!i['hive_allow_page_read'])));
+}
+function originPatternFromUrl(u?: string): string | null {
+  try {
+    if (!u) return null;
+    const url = new URL(u);
+    if (!/^https?:$/i.test(url.protocol) && url.protocol !== 'file:') return null;
+    return `${url.protocol}//${url.hostname}/*`;
+  } catch { return null; }
+}
+async function hasOriginPermission(originPat: string): Promise<boolean> {
+  return new Promise((res)=>{
+    try { chrome.permissions.contains({ origins: [originPat] }, (g:boolean)=> res(!!g)); } catch { res(false); }
+  });
+}
+function injectScript(tabId: number){
+  try { chrome.scripting.executeScript({ target: { tabId }, files: ['dist/contentScript.js'] }); } catch {}
+}
+async function maybeInjectForTab(tabId?: number, url?: string){
+  try {
+    if (!tabId || !url) return;
+    const on = await isPageReadEnabled();
+    if (!on) return;
+    const pat = originPatternFromUrl(url);
+    if (!pat) return;
+    const granted = await hasOriginPermission(pat);
+    if (!granted) return;
+    injectScript(tabId);
+  } catch {}
+}
+
+// Helper: parse bullet/sectioned suggestions text
+function parseSuggestions(text: string, nMax: number = 3): string[] {
+  try {
+    if (!text) return [];
+    let parts: string[] = [];
+    if (text.includes('\n---\n')) parts = text.split(/\n---\n/g);
+    else if (/^\s*[-*]/m.test(text)) parts = text.split(/\n\s*[-*]\s+/g).map((s)=>s.trim()).filter(Boolean);
+    else parts = text.split(/\n\n+/g);
+    return parts.map((s)=>s.trim()).filter(Boolean).slice(0, Math.max(1, Math.min(5, nMax)));
+  } catch { return []; }
+}
+
+try {
+  chrome.tabs.onUpdated.addListener((tabId:number, change:any, tab:any)=>{
+    if (change && change.status === 'complete') { void maybeInjectForTab(tabId, tab?.url); }
+  });
+} catch {}
+try {
+  chrome.tabs.onActivated.addListener((info:any)=>{
+    try { chrome.tabs.get(info.tabId, (t:any)=>{ void maybeInjectForTab(info.tabId, t?.url); }); } catch {}
+  });
+} catch {}
+
 // Build thread history with timestamps
 async function buildThreadHistory(take: number = 30): Promise<Array<{ ts:number; role:'user'|'assistant'; content:string }>>{
   try {
@@ -55,19 +129,27 @@ async function computeStateHash(): Promise<string>{
   return sha256Hex(base);
 }
 
-type Vault = { persona:any; lastConversationHash:string; lastMessage:string; threadHistory:Array<{ts:number;role:'user'|'assistant';content:string}>; syncTimestamp:number };
+type OriginClocks = Record<string, { lastUserTs?: number; lastAssistantTs?: number }>;
+type Vault = { persona:any; lastConversationHash:string; lastMessage:string; threadHistory:Array<{ts:number;role:'user'|'assistant';content:string}>; syncTimestamp:number; perOriginClocks?: OriginClocks };
 async function getVault(): Promise<Vault|null>{
   return new Promise((res)=> chrome.storage.local.get(['hive_vault'], (i:any)=> res(i?.['hive_vault'] || null)));
 }
 async function setVault(v: Vault): Promise<void>{
   return new Promise((res)=> chrome.storage.local.set({ hive_vault: v, hive_last_state_hash: v.lastConversationHash }, ()=> res()))
 }
+async function getOriginClocks(): Promise<OriginClocks>{
+  return new Promise((res)=> chrome.storage.local.get(['hive_origin_clocks'], (i:any)=> res((i && i['hive_origin_clocks']) || {})));
+}
+async function setOriginClocks(c: OriginClocks): Promise<void>{
+  return new Promise((res)=> chrome.storage.local.set({ hive_origin_clocks: c }, ()=> res()));
+}
 async function refreshVault(): Promise<Vault>{
   const persona = await getPersonaProfile();
   const history = await buildThreadHistory(60);
   const lastMessage = history.length ? history[history.length-1].content : '';
   const lastConversationHash = await computeStateHash();
-  const v: Vault = { persona, lastConversationHash, lastMessage, threadHistory: history, syncTimestamp: Date.now() };
+  const clocks = await getOriginClocks();
+  const v: Vault = { persona, lastConversationHash, lastMessage, threadHistory: history, syncTimestamp: Date.now(), perOriginClocks: clocks };
   await setVault(v);
   return v;
 }
@@ -437,6 +519,20 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         const merged = arr.concat([item]).slice(-500);
         await new Promise((res)=> chrome.storage.local.set({ [key]: merged }, ()=> res(null)));
         try { await refreshVault(); } catch {}
+        // Update per-origin clocks for arbitration
+        try {
+          const clocks = await getOriginClocks();
+          const o = host || 'unknown://';
+          const cur = clocks[o] || {};
+          if ((ev?.role === 'user') || (ev?.source && String(ev.source).toLowerCase() !== 'gpt' && ev?.role !== 'assistant')) {
+            cur.lastUserTs = now;
+          }
+          if ((ev?.role === 'assistant') || (String(ev?.source||'').toLowerCase() === 'gpt')) {
+            cur.lastAssistantTs = now;
+          }
+          clocks[o] = cur;
+          await setOriginClocks(clocks);
+        } catch {}
         // Optional auto-tune persona keywords using simple heuristic
         try {
           const autoObj = await new Promise<any>((res)=> chrome.storage.local.get(['hive_auto_tune_persona'], (i:any)=> res(i||{})));
@@ -568,11 +664,40 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         ].filter(Boolean).join(' | ');
         const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''}${up?` User Profile: ${up}.`:''}${memSummary?` Recent memory: ${memSummary}.`:''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
         const baseMessages = Array.isArray(messages) ? messages : [];
-        const finalMessages = [{ role:'system', content: sys }, ...memThread, ...baseMessages];
+        const snapshotIdx = baseMessages.findIndex((m:any)=> typeof m?.content === 'string' && m.content.startsWith('SYSTEM: Page snapshot ->'));
+        const hasSnapshot = snapshotIdx >= 0;
+        const sys2 = hasSnapshot ? (sys + ' Use the provided page snapshot. Do not claim that you cannot see the page; rely on the snapshot to answer.') : sys;
+        let snapshotMsg: any[] = [];
+        let rest: any[] = baseMessages;
+        if (hasSnapshot) { snapshotMsg = [baseMessages[snapshotIdx]]; rest = baseMessages.slice(0,snapshotIdx).concat(baseMessages.slice(snapshotIdx+1)); }
+        const finalMessages = [{ role:'system', content: sys2 }, ...memThread, ...snapshotMsg, ...rest];
 
         if (active === 'openai') {
           const useWeb = await getUseWebSession('openai');
-          const mappedBody = { model: model || reg.prefModels?.openai || 'gpt-4o-mini', messages: finalMessages, temperature: 0.7 };
+          // Optionally attach screenshot to last user message
+          let dataUrl: string = '';
+          try {
+            const flags:any = await new Promise((res)=> chrome.storage.local.get(['hive_include_screenshot'], (i:any)=> res(i||{})));
+            const want = !!flags['hive_include_screenshot'];
+            if (want) {
+              dataUrl = await new Promise((res)=>{ try { chrome.tabs.captureVisibleTab((_sender?.tab?.windowId ?? undefined), { format:'png' }, (u?:string)=> res(u||'')); } catch { res(''); } });
+            }
+          } catch {}
+          const toOAIMessages = (): any[] => {
+            const msgs = finalMessages.map((m)=> ({ role: m.role, content: m.content }));
+            if (dataUrl && /^data:image\//.test(dataUrl)){
+              for (let i=msgs.length-1; i>=0; i--){
+                if (msgs[i].role === 'user'){
+                  const textPart = { type: 'text', text: String(msgs[i].content||'') } as any;
+                  const imgPart = { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } } as any;
+                  msgs[i].content = [textPart, imgPart];
+                  break;
+                }
+              }
+            }
+            return msgs;
+          };
+          const mappedBody = { model: model || reg.prefModels?.openai || 'gpt-4o-mini', messages: toOAIMessages(), temperature: 0.7 } as any;
           if (useWeb) {
             const tabs = await findProviderTabs('openai');
             if (tabs.length) {
@@ -596,6 +721,58 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           return sendResponse({ ok: resp.ok, text, raw: json });
           }
           return sendResponse({ ok: false, error: 'no_provider_key' });
+        }
+
+        if (active === 'gemini') {
+          try {
+            const mapped = mapOpenAIToGeminiBody({ model: reg.prefModels?.gemini, messages: finalMessages });
+            // Optional screenshot
+            let addImagePart: any | null = null;
+            try {
+              const flags:any = await new Promise((res)=> chrome.storage.local.get(['hive_include_screenshot'], (i:any)=> res(i||{})));
+              const want = !!flags['hive_include_screenshot'];
+              if (want) {
+                const dataUrl: string = await new Promise((res)=>{
+                  try { chrome.tabs.captureVisibleTab((_sender?.tab?.windowId ?? undefined), { format:'png' }, (u?:string)=> res(u||'')); } catch { res(''); }
+                });
+                if (dataUrl && dataUrl.startsWith('data:image/')){
+                  const base64 = dataUrl.split(',')[1] || '';
+                  if (base64) addImagePart = { inline_data: { mime_type: 'image/png', data: base64 } };
+                }
+              }
+            } catch {}
+            if (addImagePart){
+              // attach to last user message
+              const contents:any[] = mapped.contents || [];
+              let idx = -1; for (let i=contents.length-1;i>=0;i--){ if ((contents[i]?.role||'user') !== 'model'){ idx = i; break; } }
+              if (idx >= 0) contents[idx].parts.push(addImagePart); else contents.push({ role:'user', parts:[addImagePart] });
+              mapped.contents = contents;
+            }
+            const useWeb = await getUseWebSession('gemini');
+            const toText = (data:any)=>{ const parts = data?.candidates?.[0]?.content?.parts || []; return parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n'); };
+            if (useWeb) {
+              const tabs = await findProviderTabs('gemini');
+              if (tabs.length) {
+                const u = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
+                const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ contents: mapped.contents }) }, []);
+                if (r && r.ok) return sendResponse({ ok:true, text: toText(r.data), raw: r.data, via:'web_session' });
+                return sendResponse({ ok:false, error: r?.error || 'web_session_failed' });
+              }
+              return sendResponse({ ok:false, error:'web_session_not_found' });
+            }
+            const key = (await getProviderToken('gemini')) || reg.tokens?.['gemini'];
+            if (key) {
+              const isOAuth = typeof key === 'string' && key.startsWith('oauth:');
+              const token = isOAuth ? key.slice('oauth:'.length) : key;
+              const base = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
+              const url = isOAuth ? base : `${base}?key=${encodeURIComponent(token)}`;
+              const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+              if (isOAuth) headers['Authorization'] = `Bearer ${token}`;
+              const { resp, json } = await fetchJsonWithTimeout(url, { method:'POST', headers, body: JSON.stringify({ contents: mapped.contents }) }, 12000);
+              return sendResponse({ ok: resp.ok, text: toText(json), raw: json, status: resp.status });
+            }
+            return sendResponse({ ok:false, error:'no_provider_key' });
+          } catch (e) { return sendResponse({ ok:false, error:String(e) }); }
         }
 
         if (active === 'deepseek') {
@@ -682,7 +859,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           return sendResponse({ ok: false, error: 'no_provider_key' });
         }
 
-        if (active === 'gemini') {
+        if (String(active) === 'gemini') {
           const mapped = mapOpenAIToGeminiBody({ model: model || reg.prefModels?.gemini, messages: finalMessages });
           const useWeb = await getUseWebSession('gemini');
           if (useWeb) {
@@ -762,7 +939,13 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         ].filter(Boolean).join(' | ');
         const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''}${up?` User Profile: ${up}.`:''}${memSummary?` Recent memory: ${memSummary}.`:''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
         const baseMessages = Array.isArray(thread) ? thread : [];
-        const finalMessages = [{ role:'system', content: sys }, ...memThread, ...baseMessages];
+        const snapshotIdx = baseMessages.findIndex((m:any)=> typeof m?.content === 'string' && m.content.startsWith('SYSTEM: Page snapshot ->'));
+        const hasSnapshot = snapshotIdx >= 0;
+        const sys2 = hasSnapshot ? (sys + ' Use the provided page snapshot. Do not claim that you cannot see the page; rely on the snapshot to answer.') : sys;
+        let snapshotMsg: any[] = [];
+        let rest: any[] = baseMessages;
+        if (hasSnapshot) { snapshotMsg = [baseMessages[snapshotIdx]]; rest = baseMessages.slice(0,snapshotIdx).concat(baseMessages.slice(snapshotIdx+1)); }
+        const finalMessages = [{ role:'system', content: sys2 }, ...memThread, ...snapshotMsg, ...rest];
 
         // Helper to parse suggestions
         const nMax = Math.max(1, Math.min(5, Number(max_suggestions || 3)));
@@ -777,7 +960,30 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
 
         if (active === 'openai') {
           const useWeb = await getUseWebSession('openai');
-          const body = { model: reg.prefModels?.openai || 'gpt-4o-mini', messages: finalMessages, temperature: 0.5, max_tokens: 128 };
+          // Build OpenAI-compatible messages; optionally attach screenshot to last user message
+          let dataUrl: string = '';
+          try {
+            const flags:any = await new Promise((res)=> chrome.storage.local.get(['hive_include_screenshot'], (i:any)=> res(i||{})));
+            const want = !!flags['hive_include_screenshot'];
+            if (want) {
+              dataUrl = await new Promise((res)=>{ try { chrome.tabs.captureVisibleTab((_sender?.tab?.windowId ?? undefined), { format:'png' }, (u?:string)=> res(u||'')); } catch { res(''); } });
+            }
+          } catch {}
+          const toOAIMessages = (): any[] => {
+            const msgs = finalMessages.map((m)=> ({ role: m.role, content: m.content }));
+            if (dataUrl && /^data:image\//.test(dataUrl)){
+              for (let i=msgs.length-1; i>=0; i--){
+                if (msgs[i].role === 'user'){
+                  const textPart = { type: 'text', text: String(msgs[i].content||'') } as any;
+                  const imgPart = { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } } as any;
+                  msgs[i].content = [textPart, imgPart];
+                  break;
+                }
+              }
+            }
+            return msgs;
+          };
+          const body = { model: reg.prefModels?.openai || 'gpt-4o-mini', messages: toOAIMessages(), temperature: 0.5, max_tokens: 128 } as any;
           if (useWeb) {
             const tabs = await findProviderTabs('openai');
             if (tabs.length) {

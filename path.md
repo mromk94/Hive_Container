@@ -47,6 +47,26 @@ Root: /Users/mac/CascadeProjects/Hive_container
   - Minimal page send capture; assistant capture for OpenAI/Gemini/Claude (MutationObserver)
   - Hash-based dedupe for persona/context injection
 
+## Key files updated for page reading and vision integration
+- hive-extension/manifest.json — permissions, content_scripts (all_frames), optional_host_permissions
+- hive-extension/src/popup.html — UI toggles (allow-page-read, include-screenshot)
+- hive-extension/src/popup.ts — storage wiring for toggles; per-site permission request + inject
+- hive-extension/src/contentScript.ts — bubble UI (Use/Hydrate/Read), deep page snapshot with images, injection guards
+- hive-extension/src/background.ts — auto-injector on tab updates/activations; context menu to enable site; HIVE_SUGGEST_REPLY vision (Gemini, OpenAI with optional screenshot)
+
+## New host targets (injection + permissions)
+- copilot.microsoft.com, *.bing.com
+- grok.com
+- elevenlabs.io, *.elevenlabs.io
+- www.canva.com, *.canva.com
+- meta.ai, www.meta.ai
+- github.com, *.github.com
+- new-frontend-irt9943l2-adolphuslarrygmailcoms-projects.vercel.app
+
+## UI consolidation
+- Side tab: single vertical "Hive" tab with compact action menu (Open Panel, Use my Hive, Hydrate, Read, Share persona, Pause/Resume, Rescan AI)
+- Right dock: responsive iframe with embedded-mode popup (flex chat area, sticky composer, resizable width)
+
 ## Planned
 - Security hardening (WebCrypto signing, revocation)
 - Provider registry & encrypted creds manager

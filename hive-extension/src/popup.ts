@@ -6,6 +6,9 @@ import { getDefaultGoogleOAuth } from './config.oauth';
 
 declare const chrome: any;
 
+// If loaded inside the dock iframe, switch to embedded layout for responsiveness
+try { if (window.top !== window) { document.addEventListener('DOMContentLoaded', ()=>{ try { document.body.classList.add('embedded'); } catch {} }); } } catch {}
+
 const sessionList = document.getElementById("session-list")!;
 const userInfo = document.getElementById("user-info")!;
 const setSample = document.getElementById("set-sample-user")!;
@@ -17,7 +20,7 @@ const tabChat = document.getElementById("tab-chat") as HTMLDivElement | null;
 const tabConfig = document.getElementById("tab-config") as HTMLDivElement | null;
 const tabProfile = document.getElementById("tab-profile") as HTMLDivElement | null;
 const chatLog = document.getElementById("chat-log") as HTMLDivElement | null;
-const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
+const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
 const chatSend = document.getElementById("action-primary") as HTMLButtonElement | null;
 const chatApproval = document.getElementById("chat-approval") as HTMLDivElement | null;
 const ctxSizeEl = document.getElementById('ctx-size') as HTMLSpanElement | null;
@@ -39,11 +42,15 @@ const secureStatus = document.getElementById("secure-status") as HTMLDivElement 
 const useWebSessionEl = document.getElementById('use-web-session') as HTMLInputElement | null;
 const autoTuneEl = document.getElementById('auto-tune-persona') as HTMLInputElement | null;
 const capturePageEl = document.getElementById('capture-page-chat') as HTMLInputElement | null;
+const autoHydrateEl = document.getElementById('auto-hydrate-focus') as HTMLInputElement | null;
+const allowPageReadEl = document.getElementById('allow-page-read') as HTMLInputElement | null;
+const includeScreenshotEl = document.getElementById('include-screenshot') as HTMLInputElement | null;
 const actionPrimaryBtn = document.getElementById('action-primary') as HTMLButtonElement | null;
 const actionModeBtn = document.getElementById('action-mode') as HTMLButtonElement | null;
 const actionMenuEl = document.getElementById('action-menu') as HTMLDivElement | null;
 const insertBtn = document.getElementById('chat-insert-page') as HTMLButtonElement | null;
 const insertSendBtn = document.getElementById('chat-insert-send-page') as HTMLButtonElement | null;
+const outputFormatEl = document.getElementById('output-format') as HTMLSelectElement | null;
 // OAuth buttons
 const oauthOpenAI = document.getElementById('oauth-openai') as HTMLButtonElement | null;
 const oauthGemini = document.getElementById('oauth-gemini') as HTMLButtonElement | null;
@@ -88,12 +95,19 @@ const chatMessages: ChatMessage[] = [];
 function renderChat() {
   if (!chatLog) return;
   chatLog.innerHTML = "";
+  let fmt: 'plain'|'markdown'|'html' = 'plain';
+  try { const v = (outputFormatEl?.value || '').toLowerCase(); if (v==='markdown'||v==='html') fmt = v as any; } catch {}
   for (const m of chatMessages) {
     const row = document.createElement('div'); row.className = 'msg' + (m.role === 'user' ? ' you' : '');
     const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.textContent = m.role === 'assistant' ? 'H' : (m.role === 'user' ? 'Y' : 'S');
     const wrap = document.createElement('div');
     const who = document.createElement('div'); who.className = 'who'; who.textContent = m.role === 'assistant' ? 'Hive' : (m.role === 'user' ? 'You' : 'System');
-    const bub = document.createElement('div'); bub.className = 'bubble'; bub.textContent = m.content;
+    const bub = document.createElement('div'); bub.className = 'bubble';
+    if (m.role === 'assistant' && (fmt === 'markdown' || fmt === 'html')) {
+      bub.innerHTML = renderRich(m.content, fmt);
+    } else {
+      bub.textContent = m.content;
+    }
     wrap.appendChild(who); wrap.appendChild(bub);
     row.appendChild(avatar); row.appendChild(wrap);
     chatLog.appendChild(row);
@@ -167,9 +181,29 @@ importBtn?.addEventListener('click', ()=>{
       };
       const pats = origins[active] || [];
       chrome.tabs.query({ url: pats.length ? pats : undefined }, (tabs:any[])=>{
-        if (!tabs || !tabs.length) { alert('No provider tab found. Open a chat tab and try again.'); return; }
-        const id = tabs[0].id;
-        try { chrome.tabs.sendMessage(id, { type:'HIVE_SCRAPE_THREAD', payload: { take: 12 } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {}
+        const pickAndSend = (ts:any[])=>{
+          if (!ts || !ts.length) return false;
+          const id = ts[0].id;
+          try { chrome.tabs.sendMessage(id, { type:'HIVE_SCRAPE_THREAD', payload: { take: 12 } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {}
+          return true;
+        };
+        if (pickAndSend(tabs)) return;
+        // Fallback: search a wider set of AI/chat sites
+        const aiPats = [
+          'https://*.perplexity.ai/*','https://perplexity.ai/*',
+          'https://poe.com/*',
+          'https://copilot.microsoft.com/*','https://*.bing.com/*',
+          'https://mistral.ai/*','https://chat.mistral.ai/*',
+          'https://cohere.com/*','https://dashboard.cohere.com/*',
+          'https://character.ai/*','https://beta.character.ai/*',
+          'https://you.com/*','https://chat.you.com/*',
+          'https://groq.com/*','https://console.groq.com/*',
+          'https://phind.com/*',
+          'https://huggingface.co/*','https://huggingface.co/chat/*'
+        ];
+        chrome.tabs.query({ url: aiPats }, (more:any[])=>{
+          if (!pickAndSend(more)) alert('No AI chat tab found. Open a chat page and try again.');
+        });
       });
     } catch {}
   })();
@@ -537,6 +571,52 @@ async function initProviderUI() {
   // Behavior toggles
   try { chrome.storage.local.get(['hive_auto_tune_persona'], (i:any)=>{ if (autoTuneEl) autoTuneEl.checked = !!i['hive_auto_tune_persona']; }); } catch {}
   try { chrome.storage.local.get(['hive_capture_page'], (i:any)=>{ if (capturePageEl) capturePageEl.checked = !!i['hive_capture_page']; }); } catch {}
+  try { chrome.storage.local.get(['hive_auto_hydrate_focus'], (i:any)=>{ if (autoHydrateEl) autoHydrateEl.checked = !!i['hive_auto_hydrate_focus']; }); } catch {}
+  try { chrome.storage.local.get(['hive_allow_page_read'], (i:any)=>{ if (allowPageReadEl) allowPageReadEl.checked = !!i['hive_allow_page_read']; }); } catch {}
+  try { chrome.storage.local.get(['hive_include_screenshot'], (i:any)=>{ if (includeScreenshotEl) includeScreenshotEl.checked = !!i['hive_include_screenshot']; }); } catch {}
+  // Larry: if page reading is ON, ensure host permission for current tab and inject
+  try {
+    chrome.tabs.query({ active:true, currentWindow:true }, (tabs:any[])=>{
+      try {
+        const t = tabs && tabs[0];
+        if (!t || !t.url) return;
+        const enabled = !!allowPageReadEl?.checked;
+        if (!enabled) return;
+        const u = new URL(t.url);
+        const originPat = `${u.protocol}//${u.hostname}/*`;
+        chrome.permissions.contains({ origins: [originPat] }, (has:boolean)=>{
+          if (has) return;
+          chrome.permissions.request({ origins: [originPat] }, (granted:boolean)=>{
+            if (!granted) return;
+            try { chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['dist/contentScript.js'] }); } catch {}
+          });
+        });
+      } catch {}
+    });
+  } catch {}
+  autoTuneEl?.addEventListener('change', ()=>{ try { chrome.storage.local.set({ hive_auto_tune_persona: !!autoTuneEl?.checked }); } catch {} });
+  capturePageEl?.addEventListener('change', ()=>{ try { chrome.storage.local.set({ hive_capture_page: !!capturePageEl?.checked }); } catch {} });
+  autoHydrateEl?.addEventListener('change', ()=>{ try { chrome.storage.local.set({ hive_auto_hydrate_focus: !!autoHydrateEl?.checked }); } catch {} });
+  allowPageReadEl?.addEventListener('change', ()=>{
+    try {
+      const enabled = !!allowPageReadEl?.checked;
+      chrome.storage.local.set({ hive_allow_page_read: enabled });
+      if (!enabled) return;
+      chrome.tabs.query({ active:true, currentWindow:true }, (tabs:any[])=>{
+        try {
+          const t = tabs && tabs[0];
+          if (!t || !t.url) return;
+          const u = new URL(t.url);
+          const originPat = `${u.protocol}//${u.hostname}/*`;
+          chrome.permissions.request({ origins: [originPat] }, (granted:boolean)=>{
+            if (!granted) return;
+            try { chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['dist/contentScript.js'] }); } catch {}
+          });
+        } catch {}
+      });
+    } catch {}
+  });
+  includeScreenshotEl?.addEventListener('change', ()=>{ try { chrome.storage.local.set({ hive_include_screenshot: !!includeScreenshotEl?.checked }); } catch {} });
 }
 
 async function initPersonaUI() {
@@ -603,6 +683,29 @@ try {
 function refreshCtxSize(){ try { chrome.storage.local.get(['hive_last_context_size'], (i:any)=>{ const n = Number(i['hive_last_context_size'] || 0); if (ctxSizeEl) ctxSizeEl.textContent = String(n); }); } catch {} }
 refreshCtxSize();
 try { chrome.storage.onChanged.addListener((changes:any)=>{ if (changes && changes['hive_last_context_size']) refreshCtxSize(); }); } catch {}
+
+// Persist/load output format
+try { chrome.storage.local.get(['hive_output_format'], (i:any)=>{ const v = String(i['hive_output_format']||'plain'); if (outputFormatEl) outputFormatEl.value = v; renderChat(); }); } catch {}
+outputFormatEl?.addEventListener('change', ()=>{ try { const v = outputFormatEl?.value || 'plain'; chrome.storage.local.set({ hive_output_format: v }); renderChat(); } catch {} });
+
+// Chat tab: Insert/Insert & Send current input into active page
+function getActiveTabId(): Promise<number|null>{
+  return new Promise((res)=>{
+    try { chrome.tabs.query({ active:true, currentWindow:true }, (tabs:any[])=> res((tabs && tabs[0] && tabs[0].id) || null)); } catch { res(null); }
+  });
+}
+insertBtn?.addEventListener('click', async ()=>{
+  const text = (chatInput?.value || '').trim();
+  if (!text) return;
+  const tabId = await getActiveTabId(); if (!tabId) return;
+  try { chrome.tabs.sendMessage(tabId, { type:'HIVE_INSERT_TEXT', payload: { text, send:false } }, ()=>{ /* swallow */ }); } catch {}
+});
+insertSendBtn?.addEventListener('click', async ()=>{
+  const text = (chatInput?.value || '').trim();
+  if (!text) return;
+  const tabId = await getActiveTabId(); if (!tabId) return;
+  try { chrome.tabs.sendMessage(tabId, { type:'HIVE_INSERT_TEXT', payload: { text, send:true } }, ()=>{ /* swallow */ }); } catch {}
+});
 
 // Connection status
 async function refreshConn(){
@@ -823,7 +926,73 @@ async function sendChat(){
   const handled = await tryHandleIntent(q);
   if (handled){ if (chatSend) chatSend.disabled = false; return; }
 
-  chrome.runtime.sendMessage({ type: 'HIVE_POPUP_CHAT', payload: { messages: chatMessages } }, (resp: any)=>{
+  // Build messages for send (optionally include page snapshot)
+  const buildWithSnapshot = async (): Promise<typeof chatMessages> => {
+    try {
+      const flags:any = await new Promise((res)=> chrome.storage.local.get(['hive_allow_page_read'], (i:any)=> res(i||{})));
+      if (!flags['hive_allow_page_read']) return chatMessages;
+      const tabId = await new Promise<number|null>((res)=>{ try { chrome.tabs.query({ active:true, currentWindow:true }, (tabs:any[])=> res((tabs && tabs[0] && tabs[0].id) || null)); } catch { res(null); } });
+      if (!tabId) return chatMessages;
+      const reqId = 'snap_' + Math.random().toString(36).slice(2,9);
+      let snapshotText: string = await new Promise((resolve)=>{
+        const onMsg = (m:any)=>{
+          if (m && m.type === 'HIVE_PAGE_SNAPSHOT_RESULT' && m.payload && m.payload.id === reqId){
+            try { chrome.runtime.onMessage.removeListener(onMsg); } catch {}
+            const s = m.payload.snapshot || {};
+            const title = s.title || '';
+            const url = s.url || '';
+            const selection = (s.selection || '').toString().slice(0,200);
+            const texts: string[] = Array.isArray(s.texts) ? s.texts : [];
+            const summary = texts.join(' | ').slice(0, 900);
+            const parts = [] as string[];
+            if (title) parts.push(`Title: ${title}`);
+            if (selection) parts.push(`Selection: ${selection}`);
+            if (summary) parts.push(`Summary: ${summary}`);
+            if (url) parts.push(`URL: ${url}`);
+            resolve(parts.join(' | '));
+          }
+        };
+        try { chrome.runtime.onMessage.addListener(onMsg); } catch {}
+        try { chrome.tabs.sendMessage(tabId, { type:'HIVE_PAGE_SNAPSHOT', payload: { id: reqId } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch { resolve(''); }
+        setTimeout(()=>{ try { chrome.runtime.onMessage.removeListener(onMsg); } catch {}; resolve(''); }, 4000);
+      });
+      // Fallback: execute in page with activeTab if content script not present
+      if (!snapshotText) {
+        try {
+          const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => {
+              try {
+                const sel = (window.getSelection && window.getSelection()) as any;
+                const selection = sel ? (sel.toString() || '') : '';
+                const main = document.querySelector('main') || document.body;
+                const blocks = Array.from(main.querySelectorAll('h1,h2,h3,p,li,article,section')).slice(-50) as HTMLElement[];
+                const texts = blocks.map(b=> (b.innerText || b.textContent || '').trim()).filter(Boolean).slice(-15);
+                const summary = texts.join(' | ').replace(/\s+/g,' ').slice(0, 900);
+                const title = document.title || '';
+                const url = location.href;
+                const parts: string[] = [];
+                if (title) parts.push(`Title: ${title}`);
+                if (selection) parts.push(`Selection: ${selection.slice(0,200)}`);
+                if (summary) parts.push(`Summary: ${summary}`);
+                if (url) parts.push(`URL: ${url}`);
+                return parts.join(' | ');
+              } catch { return ''; }
+            }
+          } as any);
+          snapshotText = String(result || '');
+        } catch { /* ignore */ }
+      }
+      if (!snapshotText) return chatMessages;
+      // Prepend a system page snapshot message
+      const msgs = chatMessages.slice();
+      msgs.splice(msgs.length-1, 0); // ensure same order
+      return [{ role:'system', content: `SYSTEM: Page snapshot -> ${snapshotText}` }, ...msgs];
+    } catch { return chatMessages; }
+  };
+  const msgsForSend = await buildWithSnapshot();
+  const fmt = (outputFormatEl?.value || 'plain');
+  chrome.runtime.sendMessage({ type: 'HIVE_POPUP_CHAT', payload: { messages: msgsForSend, format: fmt } }, (resp: any)=>{
     if (!resp || !resp.ok){
       chatMessages.push({ role: 'assistant', content: resp?.error ? String(resp.error) : 'Chat failed. Check provider in Config.' });
     } else {
@@ -839,7 +1008,7 @@ async function sendChat(){
 
 // Click handling is managed by unified primary handler below
 chatInput?.addEventListener('keydown', (e)=>{
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     if (actionMode === 'send') return void sendChat();
     if (actionMode === 'insert') return void pushToPage(false);
@@ -897,6 +1066,32 @@ function lastAssistantText(): string {
     if (chatMessages[i].role === 'assistant') return chatMessages[i].content || '';
   }
   return '';
+}
+
+function escapeHtml(s: string){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function mdToHtml(s: string){
+  let t = escapeHtml(s);
+  t = t.replace(/```([\s\S]*?)```/g, (m, p1)=> '<pre><code>'+p1.replace(/\n$/,'')+'</code></pre>');
+  t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+  t = t.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+  t = t.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+  t = t.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+  t = t.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+  t = t.replace(/(<li>[^<]+<\/li>)(?![\s\S]*<li>)/g, '<ul>$1</ul>');
+  t = t.replace(/\n\n/g, '<br/><br/>' );
+  return t;
+}
+function sanitizeHtml(s: string){
+  let t = s.replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi,'');
+  t = t.replace(/on\w+\s*=\s*"[^"]*"/gi,'');
+  t = t.replace(/on\w+\s*=\s*'[^']*'/gi,'');
+  return t;
+}
+function renderRich(text: string, fmt: 'markdown'|'html'){
+  if (fmt === 'markdown') return mdToHtml(text);
+  return sanitizeHtml(text);
 }
 
 function pushToPage(send:boolean){
