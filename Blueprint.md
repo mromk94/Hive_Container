@@ -177,3 +177,39 @@ Post‑MVP
 - AIverse‑Hub/SHARED_CONSCIOUSNESS_LOOP_SCL.md (SCL)
 - omakh‑Hive/docs/ (backend/API cues)
 - scout94 docs (communication, audits)
+
+---
+
+## 16. Continuity & Sync Orchestrator (Design + Impl)
+
+Goal: cross‑surface AI state sync where Hive is the source of truth for memory/persona.
+
+Data structure (HiveMemoryVault):
+- persona: object (name, tone, keywords)
+- lastConversationHash: string (sha256 of persona snapshot + recent thread)
+- lastMessage: string
+- threadHistory: Array<{ ts:number, role:'user'|'assistant', content:string }>
+- syncTimestamp: number
+
+Triggers (sync worker runs on):
+- Popup open (runtime message)
+- Message send (any HIVE_RECORD_MEMORY)
+- Refresh event (HIVE_PULL_MEMORY)
+- Idle heartbeat (chrome.alarms every ~1 min)
+
+Arbitration:
+- Prefer user‑originated updates; never treat GPT output as user intent.
+- If client last_state_hash !== vault.lastConversationHash → pull/hydrate.
+- If local newer than vault → push/update vault and mark syncTimestamp.
+
+Implementation status:
+- background.ts: buildMemorySummary(), buildMemoryMessages(), buildThreadHistory().
+- Vault helpers: computeStateHash(), getVault(), setVault(), refreshVault().
+- Handlers: HIVE_PULL_MEMORY now returns vault, HIVE_RECORD_MEMORY updates vault, HIVE_SYNC compares lastHash and returns vault diff.
+- Heartbeat: chrome.alarms 'hive_sync_heartbeat' calls refreshVault periodically.
+- contentScript: on‑page Hydrate button inserts deduped Recent Context; capture toggle records user/assistant.
+- popup: Refresh replaces chat with hydrated messages.
+
+Next:
+- Cloud backup (end‑to‑end encrypted Vault) for cross‑device continuity.
+- Page‑side auto‑hydrate on focus (toggle) with hash dedupe.

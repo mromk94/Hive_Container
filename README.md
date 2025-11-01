@@ -72,3 +72,29 @@ Canonical continuity layer for AI-Verse. Provides local encryption, Personality 
 
 ## Naming
 - Use “AI-Verse” consistently when referring to the upstream platform.
+
+## Continuity & Sync Orchestrator (WIP)
+
+This extension now provides a local continuity layer that captures and hydrates conversation context across surfaces.
+
+Shipped continuity features:
+- Hydrated prompts in popup chat and suggest: persona + recent memory thread prepended to requests.
+- Popup Refresh replaces chat with hydrated messages from local memory.
+- Page capture (toggle): user sends and assistant replies recorded into local memory with origin tagging.
+- On‑page Hydrate button inserts a short “Recent context” preface (no auto‑send).
+- Loop safeguards: insert/send dedupe; hash‑based dedupe for context/persona prefaces.
+
+Planned orchestrator (design):
+- HiveMemoryVault
+  - persona: object
+  - lastConversationHash: string
+  - lastMessage: string
+  - threadHistory: Array<{ role:'user'|'assistant', content:string, ts:number }>
+  - syncTimestamp: number
+- Sync worker (runs on: popup open, message send, refresh, idle heartbeat)
+  - Compute last_state_hash from threadHistory/persona snapshot.
+  - If incoming hash differs and newer → pull into local memory and hydrate surfaces.
+  - If local newer → push to Vault (cloud backup forthcoming) and mark syncTimestamp.
+  - Arbitration: prefer user‑authored updates; break ties by latest ts; never treat GPT output as user intent.
+
+Cloud backup is planned as an optional, end‑to‑end encrypted Vault for redundancy and cross‑device continuity.

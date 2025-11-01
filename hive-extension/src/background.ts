@@ -1,7 +1,7 @@
 import type { SessionRequest, ClientSignedToken } from "./types";
 import { signStringES256 } from "./crypto";
 import { isAllowedOrigin } from "./config";
-import { getRegistry, getPreferredModel, setPreferredModel, getProviderToken, getPersonaProfile, setProviderToken, getUserProfile, getUseWebSession } from "./registry";
+import { getRegistry, getPreferredModel, setPreferredModel, getProviderToken, getPersonaProfile, setPersonaProfile, setProviderToken, getUserProfile, getUseWebSession } from "./registry";
 import { getDefaultGoogleOAuth } from "./config.oauth";
 declare const chrome: any;
 
@@ -13,6 +13,122 @@ const BUILD_INFO = "hive-ext build: 2025-10-31 gemini-v1 latest + registry";
 
 async function getStoredUser(): Promise<any | null> {
   return new Promise((res) => chrome.storage.local.get([EXT_STORAGE_KEY], (items: Record<string, any>) => res(items[EXT_STORAGE_KEY] ?? null)));
+}
+
+// Build thread history with timestamps
+async function buildThreadHistory(take: number = 30): Promise<Array<{ ts:number; role:'user'|'assistant'; content:string }>>{
+  try {
+    const items: any[] = await new Promise((res)=>{ chrome.storage.local.get(['hive_memory'], (i:any)=> res(Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : [])); });
+    const mapped = items
+      .filter((e:any)=> typeof e?.text === 'string' || typeof e?.data?.text === 'string')
+      .map((e:any)=>{
+        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g,' ').trim();
+        const role: 'user'|'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
+        const ts = typeof e?.ts === 'number' ? e.ts : Date.now();
+        return { ts, role, content: txt };
+      })
+      .filter((m)=> m.content)
+      .sort((a,b)=> a.ts - b.ts);
+    return mapped.slice(-Math.max(2, Math.min(100, take)));
+  } catch { return []; }
+}
+
+async function sha256Hex(s: string): Promise<string>{
+  try {
+    // @ts-ignore
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  } catch {
+    // Fallback: poor-man hash
+    let h = 0; for (let i=0;i<s.length;i++){ h = ((h<<5)-h) + s.charCodeAt(i); h |= 0; }
+    return 'x'+(h>>>0).toString(16);
+  }
+}
+
+async function computeStateHash(): Promise<string>{
+  const persona = await getPersonaProfile();
+  const hist = await buildThreadHistory(40);
+  const base = JSON.stringify({
+    persona: { name: persona?.name||'', tone: persona?.tone||{}, keywords: persona?.keywords||'' },
+    history: hist.map(m=> ({ r:m.role, c:m.content }))
+  });
+  return sha256Hex(base);
+}
+
+type Vault = { persona:any; lastConversationHash:string; lastMessage:string; threadHistory:Array<{ts:number;role:'user'|'assistant';content:string}>; syncTimestamp:number };
+async function getVault(): Promise<Vault|null>{
+  return new Promise((res)=> chrome.storage.local.get(['hive_vault'], (i:any)=> res(i?.['hive_vault'] || null)));
+}
+async function setVault(v: Vault): Promise<void>{
+  return new Promise((res)=> chrome.storage.local.set({ hive_vault: v, hive_last_state_hash: v.lastConversationHash }, ()=> res()))
+}
+async function refreshVault(): Promise<Vault>{
+  const persona = await getPersonaProfile();
+  const history = await buildThreadHistory(60);
+  const lastMessage = history.length ? history[history.length-1].content : '';
+  const lastConversationHash = await computeStateHash();
+  const v: Vault = { persona, lastConversationHash, lastMessage, threadHistory: history, syncTimestamp: Date.now() };
+  await setVault(v);
+  return v;
+}
+
+// Convert local memory events into chat messages (user/assistant), oldest-first
+async function buildMemoryMessages(take: number = 12): Promise<Array<{ role: 'user'|'assistant', content: string }>> {
+  try {
+    const items: any[] = await new Promise((res)=>{
+      chrome.storage.local.get(['hive_memory'], (i:any)=> res(Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : []));
+    });
+    const mapped = items
+      .filter((e:any)=> typeof e?.text === 'string' || typeof e?.data?.text === 'string')
+      .map((e:any)=>{
+        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g,' ').trim();
+        const role: 'user'|'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
+        const ts = typeof e?.ts === 'number' ? e.ts : 0;
+        return { ts, role, content: txt };
+      })
+      .filter((m)=> m.content)
+      .sort((a,b)=> a.ts - b.ts);
+    const last = mapped.slice(-Math.max(2, Math.min(40, take)));
+    return last.map(({ role, content })=> ({ role, content }));
+  } catch { return []; }
+}
+
+// Build a concise memory summary from local ring buffer
+async function buildMemorySummary(): Promise<string> {
+  try {
+    const joined: string = await new Promise((res)=>{
+      chrome.storage.local.get(['hive_memory'], (i:any)=>{
+        const arr: any[] = Array.isArray(i?.['hive_memory']) ? i['hive_memory'] : [];
+        const last = arr.slice(-8).reverse();
+        const texts = last.map((e:any)=> typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).filter(Boolean);
+        const norm = texts.map((t:string)=> t.replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,3).map((s:string)=> s.slice(0,90));
+        res(norm.join(' | '));
+      });
+    });
+    return joined;
+  } catch {
+    return '';
+  }
+}
+
+function openPopupSafe(){
+  try {
+    const r = chrome.action.openPopup();
+    if (r && typeof r.catch === 'function') r.catch(()=>{});
+  } catch {}
+}
+async function ensureProviderTab(provider: string): Promise<number | null> {
+  const existing = await findProviderTabs(provider);
+  if (existing.length) return existing[0].id;
+  const url = provider === 'openai' ? 'https://chatgpt.com/' :
+              provider === 'claude' ? 'https://claude.ai/' :
+              provider === 'grok' ? 'https://x.ai/' :
+              provider === 'gemini' ? 'https://gemini.google.com/' :
+              provider === 'deepseek' ? 'https://deepseek.com/' : '';
+  if (!url) return null;
+  return new Promise((res)=>{
+    try { chrome.tabs.create({ url, active: false }, (t:any)=> res((t && t.id) || null)); } catch { res(null); }
+  });
 }
 
 // Provider proxy plumbing (page-session fetch)
@@ -201,6 +317,12 @@ function setActionIcons(){
   } catch {}
 }
 
+// Heartbeat for sync worker
+try { chrome.alarms.create('hive_sync_heartbeat', { periodInMinutes: 1 }); } catch {}
+try {
+  chrome.alarms.onAlarm.addListener((a:any)=>{ if (a && a.name === 'hive_sync_heartbeat') { try { void refreshVault(); } catch {} } });
+} catch {}
+
 chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (resp: any) => void) => {
   // Ensure icon set when background activates
   setActionIcons();
@@ -235,6 +357,64 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           } catch (e) {
             return sendResponse({ ok: false, error: String(e) });
           }
+
+        if (active === 'claude') {
+          try {
+            const useWeb = await getUseWebSession('claude');
+            const mapped = mapOpenAIToClaudeBody({ model: reg.prefModels?.claude, messages: finalMessages });
+            if (useWeb) {
+              const tabs = await findProviderTabs('claude');
+              if (tabs.length) {
+                const r = await sendViaTab(tabs[0].id, 'https://api.anthropic.com/v1/messages', { method:'POST', headers: { 'Content-Type':'application/json', 'anthropic-version': '2023-06-01' }, body: JSON.stringify(mapped) }, []);
+                if (r && r.ok) {
+                  const text = Array.isArray(r.data?.content) && r.data.content[0]?.text ? r.data.content[0].text : '';
+                  return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: r.data, via: 'web_session' });
+                }
+                return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+              }
+              return sendResponse({ ok: false, error: 'web_session_not_found' });
+            }
+            if (key) {
+              const { resp, json } = await fetchJsonWithTimeout('https://api.anthropic.com/v1/messages', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': key as string, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(mapped) }, 10000);
+              const text = Array.isArray(json?.content) && json.content[0]?.text ? json.content[0].text : '';
+              return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
+            }
+            return sendResponse({ ok: false, error: 'no_provider_key' });
+          } catch (e) { return sendResponse({ ok: false, error: String(e) }); }
+        }
+
+        if (active === 'gemini') {
+          try {
+            const mapped = mapOpenAIToGeminiBody({ model: reg.prefModels?.gemini, messages: finalMessages });
+            const useWeb = await getUseWebSession('gemini');
+            const toText = (data:any)=>{ const parts = data?.candidates?.[0]?.content?.parts || []; return parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n'); };
+            if (useWeb) {
+              const tabs = await findProviderTabs('gemini');
+              if (tabs.length) {
+                const u = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
+                const r = await sendViaTab(tabs[0].id, u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ contents: mapped.contents }) }, []);
+                if (r && r.ok) {
+                  const text = toText(r.data);
+                  return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: r.data, via: 'web_session' });
+                }
+                return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+              }
+              return sendResponse({ ok: false, error: 'web_session_not_found' });
+            }
+            if (key) {
+              const isOAuth = typeof key === 'string' && key.startsWith('oauth:');
+              const token = isOAuth ? key.slice('oauth:'.length) : key;
+              const base = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(mapped.model)}:generateContent`;
+              const url = isOAuth ? base : `${base}?key=${encodeURIComponent(token)}`;
+              const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+              if (isOAuth) headers['Authorization'] = `Bearer ${token}`;
+              const { resp, json } = await fetchJsonWithTimeout(url, { method:'POST', headers, body: JSON.stringify({ contents: mapped.contents }) }, 12000);
+              const text = toText(json);
+              return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
+            }
+            return sendResponse({ ok: false, error: 'no_provider_key' });
+          } catch (e) { return sendResponse({ ok: false, error: String(e) }); }
+        }
         });
       } catch (e) {
         return sendResponse({ ok: false, error: String(e) });
@@ -242,19 +422,89 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
     })();
     return true;
   }
-  if (msg?.type === "HIVE_SESSION_REQUEST") {
-    (async () => {
-      await new Promise((res) => chrome.storage.local.set({ hive_pending_session: msg.payload as SessionRequest }, () => res(null)));
-      chrome.action.openPopup();
+
+  // Lightweight cross-surface memory store (local-only)
+  if (msg?.type === 'HIVE_RECORD_MEMORY') {
+    (async ()=>{
       try {
-        chrome.runtime.sendMessage({ type: "SHOW_SESSION_REQUEST", payload: msg.payload as SessionRequest }, () => {
-          // Swallow error if no listener yet (popup not open)
-          // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-          chrome.runtime.lastError;
-        });
-      } catch {}
-      sendResponse({ ok: true });
+        const ev = msg?.payload?.event;
+        if (!ev || typeof ev !== 'object') return sendResponse({ ok:false, error:'bad_event' });
+        const host = (msg?.payload?.origin || '').toString();
+        const key = 'hive_memory';
+        const now = Date.now();
+        const item = { ts: now, origin: host, ...ev };
+        const arr = await new Promise<any[]>((res)=> chrome.storage.local.get([key], (i:any)=> res(Array.isArray(i?.[key]) ? i[key] : [])));
+        const merged = arr.concat([item]).slice(-500);
+        await new Promise((res)=> chrome.storage.local.set({ [key]: merged }, ()=> res(null)));
+        try { await refreshVault(); } catch {}
+        // Optional auto-tune persona keywords using simple heuristic
+        try {
+          const autoObj = await new Promise<any>((res)=> chrome.storage.local.get(['hive_auto_tune_persona'], (i:any)=> res(i||{})));
+          const auto = !!autoObj['hive_auto_tune_persona'];
+          if (auto && typeof ev?.text === 'string') {
+            const text = (ev.text as string).toLowerCase();
+            const stop = new Set(['about','there','which','these','those','where','should','would','could','thing','think','going','again','after','before','without','within','between','being','while','doing','using','first','second','third','however','therefore','please','thank','thanks','hello','write','reply']);
+            const tokens = text.split(/[^a-z0-9]+/g).filter((w: string)=> w && w.length>4 && !stop.has(w));
+            if (tokens.length){
+              const persona = await getPersonaProfile();
+              const cur = (persona.keywords || '').split(',').map((s:string)=>s.trim()).filter(Boolean);
+              const add = Array.from(new Set(tokens.slice(0,10).concat(cur))).slice(0,12);
+              if (add.join(', ') !== cur.join(', ')){
+                const updated = { ...persona, keywords: add.join(', ') } as any;
+                await setPersonaProfile(updated);
+              }
+            }
+          }
+        } catch {}
+        sendResponse({ ok:true, size: merged.length });
+      } catch (e) { sendResponse({ ok:false, error:String(e) }); }
     })();
+    return true;
+  }
+
+  if (msg?.type === 'HIVE_PULL_MEMORY') {
+    try {
+      const key = 'hive_memory';
+      chrome.storage.local.get([key], async (i:any)=>{
+        const items: any[] = Array.isArray(i?.[key]) ? i[key] : [];
+        const persona = await getPersonaProfile();
+        const user = await getUserProfile();
+        const messages = await buildMemoryMessages(30);
+        const vault = await refreshVault();
+        sendResponse({ ok:true, events: items.slice(-200), messages, persona, user, vault });
+      });
+    } catch (e) { sendResponse({ ok:false, error:String(e) }); }
+    return true;
+  }
+
+  if (msg?.type === 'HIVE_SYNC') {
+    (async ()=>{
+      try {
+        const clientHash = (msg?.payload?.lastHash || msg?.payload?.clientHash || '').toString();
+        const vault = await refreshVault();
+        const changed = !clientHash || clientHash !== vault.lastConversationHash;
+        sendResponse({ ok:true, changed, vault, lastHash: vault.lastConversationHash, ts: vault.syncTimestamp });
+      } catch (e) { sendResponse({ ok:false, error:String(e) }); }
+    })();
+    return true;
+  }
+  if (msg?.type === "HIVE_SESSION_REQUEST") {
+    // openPopup must run in direct response to user gesture; avoid awaits first
+    openPopupSafe();
+    // Store pending request and meta (async)
+    try {
+      const meta = { tabId: _sender?.tab?.id ?? null, frameId: _sender?.frameId ?? null, ts: Date.now() };
+      chrome.storage.local.set({ hive_pending_session: msg.payload as SessionRequest, hive_pending_session_tab: meta }, ()=>{});
+    } catch {}
+    // Nudge popup to render
+    try {
+      chrome.runtime.sendMessage({ type: "SHOW_SESSION_REQUEST", payload: msg.payload as SessionRequest }, () => {
+        // Swallow error if no listener yet (popup not open)
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        chrome.runtime.lastError;
+      });
+    } catch {}
+    sendResponse({ ok: true });
     return true;
   }
 
@@ -301,8 +551,9 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         const active = reg.active;
         const key = (await getProviderToken(active)) || reg.tokens?.[active];
         if (!active) return sendResponse({ ok: false, error: "no_active_provider" });
-        if (!key && active !== 'local') return sendResponse({ ok: false, error: "no_provider_key" });
         const sysPersona = await getPersonaProfile();
+        const memSummary = await buildMemorySummary();
+        const memThread = await buildMemoryMessages(12);
         const usr = await getUserProfile();
         const lang = (typeof navigator !== 'undefined' && (navigator as any)?.language) || (chrome && chrome.i18n && chrome.i18n.getUILanguage && chrome.i18n.getUILanguage()) || 'en';
         const kws = (sysPersona.keywords || "").split(",").map((s)=>s.trim()).filter(Boolean).slice(0,5).join(", ");
@@ -315,9 +566,9 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           usr.education && `Education: ${usr.education}`,
           usr.socials && `Socials: ${usr.socials}`
         ].filter(Boolean).join(' | ');
-        const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''}${up?` User Profile: ${up}.`:''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
+        const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''}${up?` User Profile: ${up}.`:''}${memSummary?` Recent memory: ${memSummary}.`:''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
         const baseMessages = Array.isArray(messages) ? messages : [];
-        const finalMessages = [{ role:'system', content: sys }, ...baseMessages];
+        const finalMessages = [{ role:'system', content: sys }, ...memThread, ...baseMessages];
 
         if (active === 'openai') {
           const useWeb = await getUseWebSession('openai');
@@ -495,13 +746,23 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         const reg = await getRegistry();
         const active = reg.active;
         const key = (await getProviderToken(active)) || reg.tokens?.[active];
-        if (!key && active !== 'local') return sendResponse({ ok: false, error: "no_provider_key" });
+        // Do not require a key if Web Session is enabled; provider branches handle fallbacks
         const sysPersona = await getPersonaProfile();
+        const memSummary = await buildMemorySummary();
+        const memThread = await buildMemoryMessages(8);
+        const usr = await getUserProfile();
         const lang = (typeof navigator !== 'undefined' && (navigator as any)?.language) || (chrome && chrome.i18n && chrome.i18n.getUILanguage && chrome.i18n.getUILanguage()) || 'en';
         const kws = (sysPersona.keywords || "").split(",").map((s)=>s.trim()).filter(Boolean).slice(0,5).join(", ");
-        const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
+        const up = [
+          usr.personality && `Personality: ${usr.personality}`,
+          usr.allergies && `Allergies: ${usr.allergies}`,
+          usr.preferences && `Preferences: ${usr.preferences}`,
+          usr.location && `Location: ${usr.location}`,
+          usr.interests && `Interests: ${usr.interests}`
+        ].filter(Boolean).join(' | ');
+        const sys = `You are ${sysPersona.name || 'Hive'}, tone formality ${sysPersona?.tone?.formality ?? 50}/100, concision ${sysPersona?.tone?.concision ?? 50}/100${kws?`, keywords: ${kws}`:''}. ${sysPersona.rules ? ('Guidelines: '+sysPersona.rules) : ''}${up?` User Profile: ${up}.`:''}${memSummary?` Recent memory: ${memSummary}.`:''} Browser language: ${lang}. Prefer responding in that language unless the user specifies otherwise.`.trim();
         const baseMessages = Array.isArray(thread) ? thread : [];
-        const finalMessages = [{ role:'system', content: sys }, ...baseMessages];
+        const finalMessages = [{ role:'system', content: sys }, ...memThread, ...baseMessages];
 
         // Helper to parse suggestions
         const nMax = Math.max(1, Math.min(5, Number(max_suggestions || 3)));
@@ -514,40 +775,89 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
           return parts.map((s)=>s.trim()).filter(Boolean).slice(0, nMax);
         };
 
-        if (active === 'openai' && key) {
-          const { resp, json } = await fetchJsonWithTimeout('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: reg.prefModels?.openai || 'gpt-4o-mini', messages: finalMessages, temperature: 0.5, max_tokens: 128 })
-          }, 8000);
-          const text = json?.choices?.[0]?.message?.content || '';
-          return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
-        }
-
-        if (active === 'deepseek' && key) {
-          try {
-            const isUrl = /^https?:\/\//i.test(String(key));
-            const base = isUrl ? String(key).trim().replace(/\/+$/, '') : 'https://api.deepseek.com';
-            const u = `${base}/v1/chat/completions`;
-            const headers: Record<string,string> = { 'Content-Type': 'application/json' };
-            if (!isUrl) headers['Authorization'] = `Bearer ${key}`;
-            const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers, body: JSON.stringify({ model: reg.prefModels?.deepseek || 'deepseek-chat', messages: finalMessages, temperature: 0.5, max_tokens: 128 }) }, 12000);
+        if (active === 'openai') {
+          const useWeb = await getUseWebSession('openai');
+          const body = { model: reg.prefModels?.openai || 'gpt-4o-mini', messages: finalMessages, temperature: 0.5, max_tokens: 128 };
+          if (useWeb) {
+            const tabs = await findProviderTabs('openai');
+            if (tabs.length) {
+              const r = await sendViaTab(tabs[0].id, 'https://api.openai.com/v1/chat/completions', { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) }, []);
+              if (r && r.ok) {
+                const text = r.data?.choices?.[0]?.message?.content || '';
+                return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: r.data, via: 'web_session' });
+              }
+              return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+            }
+            return sendResponse({ ok: false, error: 'web_session_not_found' });
+          }
+          if (key) {
+            const { resp, json } = await fetchJsonWithTimeout('https://api.openai.com/v1/chat/completions', {
+              method: 'POST', headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            }, 8000);
             const text = json?.choices?.[0]?.message?.content || '';
             return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
+          }
+          return sendResponse({ ok: false, error: 'no_provider_key' });
+        }
+
+        if (active === 'deepseek') {
+          try {
+            const useWeb = await getUseWebSession('deepseek');
+            const body = { model: reg.prefModels?.deepseek || 'deepseek-chat', messages: finalMessages, temperature: 0.5, max_tokens: 128 };
+            if (useWeb) {
+              const tabs = await findProviderTabs('deepseek');
+              if (tabs.length) {
+                const r = await sendViaTab(tabs[0].id, 'https://api.deepseek.com/v1/chat/completions', { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) }, []);
+                if (r && r.ok) {
+                  const text = r.data?.choices?.[0]?.message?.content || '';
+                  return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: r.data, via: 'web_session' });
+                }
+                return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+              }
+              return sendResponse({ ok: false, error: 'web_session_not_found' });
+            }
+            if (key) {
+              const isUrl = /^https?:\/\//i.test(String(key));
+              const base = isUrl ? String(key).trim().replace(/\/\/+$/, '') : 'https://api.deepseek.com';
+              const u = `${base}/v1/chat/completions`;
+              const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+              if (!isUrl) headers['Authorization'] = `Bearer ${key}`;
+              const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers, body: JSON.stringify(body) }, 12000);
+              const text = json?.choices?.[0]?.message?.content || '';
+              return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
+            }
+            return sendResponse({ ok: false, error: 'no_provider_key' });
           } catch (e) {
             return sendResponse({ ok: false, error: String(e) });
           }
         }
 
-        if (active === 'grok' && key) {
+        if (active === 'grok') {
           try {
-            const isUrl = /^https?:\/\//i.test(String(key));
-            if (!isUrl) return sendResponse({ ok: false, error: 'grok_requires_base_url_token' });
-            const base = String(key).trim().replace(/\/+$/, '');
-            const u = `${base}/v1/chat/completions`;
-            const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: reg.prefModels?.grok || 'grok', messages: finalMessages, temperature: 0.5, max_tokens: 128 }) }, 12000);
-            const text = json?.choices?.[0]?.message?.content || '';
-            return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
+            const useWeb = await getUseWebSession('grok');
+            const body = { model: reg.prefModels?.grok || 'grok', messages: finalMessages, temperature: 0.5, max_tokens: 128 };
+            if (useWeb) {
+              const tabs = await findProviderTabs('grok');
+              if (tabs.length) {
+                const r = await sendViaTab(tabs[0].id, 'https://api.x.ai/v1/chat/completions', { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) }, []);
+                if (r && r.ok) {
+                  const text = r.data?.choices?.[0]?.message?.content || '';
+                  return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: r.data, via: 'web_session' });
+                }
+                return sendResponse({ ok: false, error: r?.error || 'web_session_failed' });
+              }
+              return sendResponse({ ok: false, error: 'web_session_not_found' });
+            }
+            if (key) {
+              const isUrl = /^https?:\/\//i.test(String(key));
+              if (!isUrl) return sendResponse({ ok: false, error: 'grok_requires_base_url_token' });
+              const base = String(key).trim().replace(/\/\/+$/, '');
+              const u = `${base}/v1/chat/completions`;
+              const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 12000);
+              const text = json?.choices?.[0]?.message?.content || '';
+              return sendResponse({ ok: resp.ok, suggestions: parseSuggestions(text), raw: json, status: resp.status });
+            }
+            return sendResponse({ ok: false, error: 'no_provider_key' });
           } catch (e) {
             return sendResponse({ ok: false, error: String(e) });
           }
@@ -556,18 +866,30 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         if (active === 'local' && key) {
           try {
             const base = String(key).trim().replace(/\/+$/, "");
-            const u1 = `${base}/v1/chat/completions`;
-            const u2 = `${base}/chat/completions`;
-            const p1 = fetchJsonWithTimeout(u1, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'local', messages: finalMessages, temperature: 0.5, max_tokens: 128 }) }, 8000)
-              .then(({resp,json})=>({resp,json,url:u1})).catch(()=>null);
-            const p2 = fetchJsonWithTimeout(u2, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'local', messages: finalMessages, temperature: 0.5, max_tokens: 128 }) }, 8000)
-              .then(({resp,json})=>({resp,json,url:u2})).catch(()=>null);
-            const first = await Promise.race([p1, p2].filter(Boolean) as Promise<any>[]);
-            if (first && first.resp.ok) {
-              const text = first.json?.choices?.[0]?.message?.content || '';
-              return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: first.json, status: first.resp.status, usedUrl: first.url });
+            const endpoints = [
+              `${base}/v1/chat/completions`,
+              `${base}/chat/completions`,
+              `${base}/v1/messages`,
+              `${base}/chat`
+            ];
+            const tried: Array<{ url: string; status: number; body?: any }> = [];
+            let lastJson: any = null;
+            for (const u of endpoints) {
+              const resp = await fetch(u, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model: 'local', messages: finalMessages, temperature: 0.5, max_tokens: 128 })
+              });
+              let json: any = null;
+              try { json = await resp.json(); } catch { json = { text: await resp.text() }; }
+              tried.push({ url: u, status: resp.status, body: json });
+              if (resp.ok) {
+                const text = json?.choices?.[0]?.message?.content || '';
+                return sendResponse({ ok: true, suggestions: parseSuggestions(text), raw: json, status: resp.status, usedUrl: u, tried });
+              }
+              lastJson = json;
             }
-            return sendResponse({ ok: false, error: 'local_timeout_or_error' });
+            return sendResponse({ ok: false, error: 'local_timeout_or_error', tried, last: lastJson });
           } catch (e) {
             return sendResponse({ ok: false, error: String(e) });
           }
@@ -625,6 +947,24 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         const v1 = await fetch(`https://generativelanguage.googleapis.com/v1/models${isOAuth?'':`?key=${encodeURIComponent(token)}`}`, { headers: h }).then(r=>r.json());
         const v1beta = await fetch(`https://generativelanguage.googleapis.com/v1beta/models${isOAuth?'':`?key=${encodeURIComponent(token)}`}`, { headers: h }).then(r=>r.json());
         sendResponse({ ok: true, v1, v1beta });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg?.type === "HIVE_CHECK_CONN") {
+    (async () => {
+      try {
+        const reg = await getRegistry();
+        const active = reg.active;
+        const key = (await getProviderToken(active)) || reg.tokens?.[active];
+        const hasKey = !!key;
+        const webEnabled = await getUseWebSession(active);
+        let webTabs = 0;
+        try { const tabs = await findProviderTabs(active); webTabs = Array.isArray(tabs) ? tabs.length : 0; } catch {}
+        sendResponse({ ok: true, active, hasKey, webEnabled, webTabs });
       } catch (e) {
         sendResponse({ ok: false, error: String(e) });
       }

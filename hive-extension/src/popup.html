@@ -44,6 +44,17 @@
       @keyframes popIn { from { transform: scale(.98); opacity:.0;} to { transform: scale(1); opacity:1;} }
       @keyframes fadeIn { from { opacity:.0; } to { opacity:1; } }
       body.min #tab-chat .chat-log{ height: 90px; }
+      /* Composer */
+      .composer { display:flex; gap:8px; margin-top:8px; align-items:center; }
+      .composer input { flex:1; }
+      .action-group { position:relative; display:flex; gap:6px; }
+      .btn.primary { padding:10px 14px; border-radius:12px; font-weight:600; }
+      .btn.caret { width:38px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:12px; }
+      .menu { position:absolute; right:0; bottom:42px; background:#0f0f0f; border:1px solid var(--outline); border-radius:12px; min-width:180px; box-shadow: 0 20px 40px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.03) inset; display:none; }
+      .menu.open { display:block; animation: fadeIn .12s ease both; }
+      .menu button { width:100%; text-align:left; background:transparent; border:0; border-bottom:1px solid #151515; border-radius:0; padding:10px 12px; }
+      .menu button:last-child { border-bottom:0; }
+      .menu button.active { background: linear-gradient(180deg, rgba(212,175,55,.22), rgba(212,175,55,.10)); }
     </style>
   </head>
   <body>
@@ -63,15 +74,28 @@
     <div id="tab-chat">
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <h3>Hive Chat</h3>
-        <div class="value">Context: <span id="ctx-size">0</span></div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="import-thread" class="btn" style="padding:4px 8px;">Import thread</button>
+          <button id="refresh-memory" class="btn" style="padding:4px 8px;">Refresh</button>
+          <div class="value">Context: <span id="ctx-size">0</span></div>
+          <div class="value" id="conn-status">Not connected</div>
+        </div>
       </div>
       <div id="chat-approval" class="row" style="display:none;">
         <!-- approval banner content injected by popup.ts -->
       </div>
       <div id="chat-log" class="chat-log" aria-live="polite"></div>
-      <div style="display:flex; gap:6px; margin-top:8px;">
+      <div class="composer">
         <input id="chat-input" type="text" placeholder="Ask your AI..." />
-        <button id="chat-send" class="btn">Send</button>
+        <div class="action-group">
+          <button id="action-primary" class="btn primary">Send</button>
+          <button id="action-mode" class="btn caret" title="Change action">▾</button>
+          <div id="action-menu" class="menu">
+            <button data-mode="send" class="btn">Send</button>
+            <button data-mode="insert" class="btn">Insert into page</button>
+            <button data-mode="insert_send" class="btn">Insert &amp; Send</button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="tab-config" style="display:none;">
@@ -164,6 +188,18 @@
         <button id="grant-current" class="btn">Grant Current Tab (minimal)</button>
       </div>
       <div class="value" style="margin-top:6px;">View and revoke domains you've granted access. "Grant Current" adds the active tab's domain with minimal scopes.</div>
+    </div>
+    <div class="row">
+      <h4>Behavior</h4>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input id="auto-tune-persona" type="checkbox" />
+        <label for="auto-tune-persona">Auto-tune persona from my writing</label>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+        <input id="capture-page-chat" type="checkbox" />
+        <label for="capture-page-chat">Capture page chat to Hive</label>
+      </div>
+      <div class="value" style="margin-top:6px;">Enables gentle, local-only updates to persona keywords based on your recent messages. Can be toggled anytime.</div>
     </div>
     <hr/>
     <h4>Controls</h4>

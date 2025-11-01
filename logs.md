@@ -95,3 +95,14 @@
 - 14:35 Popup UX: Introduced 2-tab layout — Chat (default) and Config (existing settings). Chat panel streams via HIVE_POPUP_CHAT.
 - 14:36 Background: Added HIVE_POPUP_CHAT (provider-backed chat with persona system) and HIVE_UPDATE_CONTEXT (rolling events per origin/session).
 - 14:38 Popup: Wired tab switching and minimal chat send; messages render in chat log.
+
+### 2025-11-01
+- 01:25 Continuity: Added buildMemorySummary and buildMemoryMessages; HIVE_PULL_MEMORY now returns hydrated messages for rehydration.
+- 01:32 Popup Refresh: replaces chat with hydrated thread from memory instead of summary text.
+- 01:36 Memory Recording: Popup now records user messages, assistant replies, import events, and insert actions with origin tags.
+- 01:40 UI (Config): Added toggle “Capture page chat to Hive” persisted as hive_capture_page.
+- 01:42 Page Bubble: Added “Hydrate” button to inject short recent context preface (no auto-send).
+- 01:44 Page Capture: Minimal user send capture on sendAttempt when toggle ON.
+- 01:46 Assistant Capture: MutationObserver for OpenAI; later extended to Gemini and Claude heuristics; dedupe by trimmed key.
+- 01:50 Loop Guard: Hash-based dedupe for persona and recent context prefaces (per-origin last hash in storage + window cache).
+- 01:55 Build: npm run build succeeded (background/contentScript/popup bundles updated).

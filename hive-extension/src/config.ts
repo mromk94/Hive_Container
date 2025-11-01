@@ -2,7 +2,13 @@
 export const ALLOWLIST: string[] = [
   "file://",
   "http://localhost",
-  "https://localhost"
+  "https://localhost",
+  // Provider and common sites
+  "https://chatgpt.com",
+  "https://claude.ai",
+  "https://x.ai",
+  "https://gemini.google.com",
+  "https://deepseek.com"
 ];
 
 export function isAllowedOrigin(origin?: string | null): boolean {

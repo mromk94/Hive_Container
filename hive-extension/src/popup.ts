@@ -18,9 +18,12 @@ const tabConfig = document.getElementById("tab-config") as HTMLDivElement | null
 const tabProfile = document.getElementById("tab-profile") as HTMLDivElement | null;
 const chatLog = document.getElementById("chat-log") as HTMLDivElement | null;
 const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
-const chatSend = document.getElementById("chat-send") as HTMLButtonElement | null;
+const chatSend = document.getElementById("action-primary") as HTMLButtonElement | null;
 const chatApproval = document.getElementById("chat-approval") as HTMLDivElement | null;
 const ctxSizeEl = document.getElementById('ctx-size') as HTMLSpanElement | null;
+const connStatusEl = document.getElementById('conn-status') as HTMLDivElement | null;
+const importBtn = document.getElementById('import-thread') as HTMLButtonElement | null;
+const refreshBtn = document.getElementById('refresh-memory') as HTMLButtonElement | null;
 const btnMin = document.getElementById('btn-min') as HTMLButtonElement | null;
 const btnClose = document.getElementById('btn-close') as HTMLButtonElement | null;
 const providerSelect = document.getElementById("provider-select") as HTMLSelectElement | null;
@@ -34,6 +37,13 @@ const saveModelBtn = document.getElementById("save-model") as HTMLButtonElement 
 const listModelsBtn = document.getElementById("list-models") as HTMLButtonElement | null;
 const secureStatus = document.getElementById("secure-status") as HTMLDivElement | null;
 const useWebSessionEl = document.getElementById('use-web-session') as HTMLInputElement | null;
+const autoTuneEl = document.getElementById('auto-tune-persona') as HTMLInputElement | null;
+const capturePageEl = document.getElementById('capture-page-chat') as HTMLInputElement | null;
+const actionPrimaryBtn = document.getElementById('action-primary') as HTMLButtonElement | null;
+const actionModeBtn = document.getElementById('action-mode') as HTMLButtonElement | null;
+const actionMenuEl = document.getElementById('action-menu') as HTMLDivElement | null;
+const insertBtn = document.getElementById('chat-insert-page') as HTMLButtonElement | null;
+const insertSendBtn = document.getElementById('chat-insert-send-page') as HTMLButtonElement | null;
 // OAuth buttons
 const oauthOpenAI = document.getElementById('oauth-openai') as HTMLButtonElement | null;
 const oauthGemini = document.getElementById('oauth-gemini') as HTMLButtonElement | null;
@@ -88,8 +98,120 @@ function renderChat() {
     row.appendChild(avatar); row.appendChild(wrap);
     chatLog.appendChild(row);
   }
-  chatLog.scrollTop = chatLog.scrollHeight;
+  try { if (chatLog) chatLog.scrollTop = chatLog.scrollHeight; } catch {}
 }
+
+// Load persisted chat on init
+function loadChatLog(){
+  try {
+    chrome.storage.local.get(['hive_popup_chat_log'], (i:any)=>{
+      const arr: ChatMessage[] = Array.isArray(i['hive_popup_chat_log']) ? i['hive_popup_chat_log'] : [];
+      if (arr.length) { chatMessages.push(...arr); renderChat(); }
+    });
+
+// Refresh memory: pull from background and hydrate full chat thread
+refreshBtn?.addEventListener('click', ()=>{
+  try {
+    chrome.runtime.sendMessage({ type: 'HIVE_PULL_MEMORY' }, (resp:any)=>{
+      if (!resp || !resp.ok){ alert('Refresh failed'); return; }
+      const msgs: Array<{role:'user'|'assistant', content:string}> = Array.isArray(resp.messages) ? resp.messages : [];
+      chatMessages.length = 0;
+      chatMessages.push({ role:'system', content: 'Hydrated from Hive' });
+      for (const m of msgs) chatMessages.push({ role: m.role, content: m.content });
+      renderChat();
+      try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+    });
+  } catch {}
+});
+  } catch {}
+}
+
+// Minimal sync orchestrator client: compare last hash and hydrate if changed
+function attemptSync(){
+  try {
+    chrome.storage.local.get(['hive_last_state_hash'], (i:any)=>{
+      const lastHash = (i && i['hive_last_state_hash']) ? String(i['hive_last_state_hash']) : '';
+      chrome.runtime.sendMessage({ type:'HIVE_SYNC', payload: { lastHash } }, (resp:any)=>{
+        if (!resp || !resp.ok) return;
+        if (resp.changed){
+          // Pull and hydrate
+          chrome.runtime.sendMessage({ type: 'HIVE_PULL_MEMORY' }, (r:any)=>{
+            if (!r || !r.ok) return;
+            const msgs: Array<{role:'user'|'assistant', content:string}> = Array.isArray(r.messages) ? r.messages : [];
+            chatMessages.length = 0;
+            chatMessages.push({ role:'system', content: 'Hydrated from Hive' });
+            for (const m of msgs) chatMessages.push({ role: m.role, content: m.content });
+            renderChat();
+            try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+          });
+        }
+      });
+    });
+  } catch {}
+}
+
+// Import thread from active provider tab and seed chat
+importBtn?.addEventListener('click', ()=>{
+  (async()=>{
+    try {
+      // find provider tabs via background to respect provider selection
+      const resp = await new Promise<any>((res)=> chrome.runtime.sendMessage({ type: 'HIVE_CHECK_CONN' }, (r:any)=> res(r)));
+      const active = resp?.active || 'openai';
+      // query tabs for origin and send scrape request
+      const origins: Record<string,string[]> = {
+        openai: ['https://chatgpt.com/*','https://*.openai.com/*'],
+        claude: ['https://claude.ai/*'],
+        gemini: ['https://gemini.google.com/*','https://*.google.com/*'],
+        grok: ['https://x.ai/*'],
+        deepseek: ['https://deepseek.com/*','https://*.deepseek.com/*']
+      };
+      const pats = origins[active] || [];
+      chrome.tabs.query({ url: pats.length ? pats : undefined }, (tabs:any[])=>{
+        if (!tabs || !tabs.length) { alert('No provider tab found. Open a chat tab and try again.'); return; }
+        const id = tabs[0].id;
+        try { chrome.tabs.sendMessage(id, { type:'HIVE_SCRAPE_THREAD', payload: { take: 12 } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {}
+      });
+    } catch {}
+  })();
+});
+
+chrome.runtime.onMessage.addListener((msg:any)=>{
+  if (msg?.type === 'HIVE_SCRAPE_THREAD_RESULT'){
+    try {
+      const arr: Array<{role:'user'|'assistant', content:string}> = Array.isArray(msg.payload?.messages) ? msg.payload.messages : [];
+      if (!arr.length) { alert('No messages found in page.'); return; }
+      // Seed chat with a divider then imported messages
+      chatMessages.push({ role:'system', content:`Imported thread from ${msg.payload?.origin || 'page'}:` });
+      for (const m of arr) chatMessages.push({ role: m.role, content: m.content });
+      renderChat();
+      try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+      // Record import event to memory bus
+      try { chrome.runtime.sendMessage({ type:'HIVE_RECORD_MEMORY', payload: { origin: msg.payload?.origin || 'page', event: { source:'page', type:'import_thread', count: arr.length } } }); } catch {}
+    } catch {}
+  }
+});
+
+// Poll for pending session to make approval banner resilient
+let pollTimer: number | null = null;
+function startPendingPoll(){
+  if (pollTimer != null) return;
+  pollTimer = window.setInterval(()=>{
+    try {
+      if (pendingSession) return;
+      chrome.storage.local.get(["hive_pending_session"], (items:any)=>{
+        const s = items["hive_pending_session"] as SessionRequest | undefined;
+        if (s) {
+          pendingSession = s;
+          renderSession();
+          chrome.storage.local.remove(["hive_pending_session"]);
+          renderChatApproval();
+        }
+      });
+    } catch {}
+  }, 1000);
+}
+startPendingPoll();
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) startPendingPoll(); });
 
 async function initUserProfileUI(){
   try {
@@ -412,6 +534,9 @@ async function initProviderUI() {
   } catch {}
   // Render consents
   void refreshConsents();
+  // Behavior toggles
+  try { chrome.storage.local.get(['hive_auto_tune_persona'], (i:any)=>{ if (autoTuneEl) autoTuneEl.checked = !!i['hive_auto_tune_persona']; }); } catch {}
+  try { chrome.storage.local.get(['hive_capture_page'], (i:any)=>{ if (capturePageEl) capturePageEl.checked = !!i['hive_capture_page']; }); } catch {}
 }
 
 async function initPersonaUI() {
@@ -432,6 +557,11 @@ chrome.runtime.onMessage.addListener((msg: any) => {
     renderSession();
     renderChatApproval();
   }
+  if (msg?.type === 'HIVE_SESSION_APPROVED'){
+    try { (window as any).__hiveSessionToken = msg.payload?.token; } catch {}
+    try { chatMessages.push({ role:'system', content:'Connected: session approved' }); renderChat(); try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {} } catch {}
+    void refreshConn();
+  }
 });
 
 // Initialize from storage in case popup opened before runtime message arrives
@@ -450,7 +580,9 @@ void initProviderUI();
 void initPersonaUI();
 void initUserProfileUI();
 switchTab('chat');
+loadChatLog();
 renderChat();
+attemptSync();
 // OAuth inputs persistence (Google/Gemini)
 try {
   chrome.storage.local.get(['hive_google_client_id','hive_google_scopes'], (i:any)=>{
@@ -471,6 +603,21 @@ try {
 function refreshCtxSize(){ try { chrome.storage.local.get(['hive_last_context_size'], (i:any)=>{ const n = Number(i['hive_last_context_size'] || 0); if (ctxSizeEl) ctxSizeEl.textContent = String(n); }); } catch {} }
 refreshCtxSize();
 try { chrome.storage.onChanged.addListener((changes:any)=>{ if (changes && changes['hive_last_context_size']) refreshCtxSize(); }); } catch {}
+
+// Connection status
+async function refreshConn(){
+  try {
+    chrome.runtime.sendMessage({ type: 'HIVE_CHECK_CONN' }, (resp:any)=>{
+      if (!connStatusEl) return;
+      if (!resp || !resp.ok){ connStatusEl.textContent = 'Not connected'; return; }
+      const { active, hasKey, webEnabled, webTabs } = resp;
+      const mode = webEnabled ? (webTabs>0 ? 'Web Session' : 'Web Session (no tab)') : (hasKey ? 'API Key' : 'none');
+      const connected = webEnabled ? (webTabs>0) : hasKey;
+      connStatusEl.textContent = connected ? `Connected: ${active} • ${mode}` : `Configured: ${active} • ${mode}`;
+    });
+  } catch {}
+}
+void refreshConn();
 
 // Minimize/Close buttons
 btnMin?.addEventListener('click', ()=>{ try { document.body.classList.toggle('min'); } catch {} });
@@ -523,27 +670,54 @@ function renderSession() {
 
 async function approveSession() {
   if (!pendingSession) return;
-  const user = await new Promise<any>((res) => chrome.storage.local.get(["hive_extension_user"], (i:any) => res(i["hive_extension_user"])));
+  const reqOrigin = pendingSession.appOrigin || '';
+  let user = await new Promise<any>((res) => chrome.storage.local.get(["hive_extension_user"], (i:any) => res(i["hive_extension_user"])));
   if (!user) {
-    alert("No user set. Use dev button to set a sample user.");
-    return;
+    // Create a minimal local user so approval doesn't get stuck
+    user = { userId: `guest_${Math.random().toString(36).slice(2,8)}`, displayName: "Guest" };
+    try { await new Promise((res)=> chrome.storage.local.set({ hive_extension_user: user }, ()=> res(null))); } catch {}
   }
-  const signedToken = await new Promise<ClientSignedToken>((res) => {
+  const createResp = await new Promise<any>((res) => {
     chrome.runtime.sendMessage({
       type: "HIVE_CREATE_TOKEN",
       payload: { userId: user.userId, sessionId: pendingSession!.sessionId, scopes: pendingSession!.requestedScopes, origin: pendingSession!.appOrigin, singleUse: (document.getElementById("single-use") as HTMLInputElement)?.checked ?? false }
-    }, (resp: any) => { res(resp.token); });
+    }, (resp: any) => { res(resp); });
   });
+  if (!createResp || !createResp.ok || !createResp.token) {
+    alert('Approval failed: ' + (createResp?.error || 'unknown'));
+    return;
+  }
+  const signedToken: ClientSignedToken = createResp.token;
 
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-    if (!tabs || tabs.length === 0) return;
-    chrome.tabs.sendMessage(tabs[0].id, { type: "HIVE_SESSION_APPROVED", payload: { token: signedToken } });
-  });
-
-  pendingSession = null;
-  chrome.storage.local.remove(["hive_pending_session"]);
-  renderSession();
-  renderChatApproval();
+  try {
+    // Capture requesting tab before clearing keys
+    const meta: any = await new Promise((res)=> chrome.storage.local.get(['hive_pending_session_tab'], (i:any)=> res(i && i['hive_pending_session_tab'])));
+    // Clear pending keys to stop poll repaint
+    await new Promise((res)=> chrome.storage.local.remove(["hive_pending_session","hive_pending_session_tab"], ()=> res(null)));
+    // Update local state
+    pendingSession = null;
+    renderSession();
+    renderChatApproval();
+    // Helper to safely send to a tab
+    const safeSend = (id:number)=>{ try { chrome.tabs.sendMessage(id, { type: 'HIVE_SESSION_APPROVED', payload: { token: signedToken } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {} };
+    // Notify specific tab first
+    if (meta && typeof meta.tabId === 'number') safeSend(meta.tabId);
+    // Then target tabs by origin pattern if available
+    let targeted = 0;
+    try {
+      if (reqOrigin && /^https?:\/\//.test(reqOrigin)){
+        const u = new URL(reqOrigin);
+        const pat = `${u.protocol}//${u.host}/*`;
+        chrome.tabs.query({ url: [pat] }, (tabs:any[])=>{ for(const t of tabs||[]){ targeted++; safeSend(t.id); } });
+      }
+    } catch {}
+    // Fallback: broadcast only if nothing was targeted
+    if (!targeted){
+      try {
+        chrome.tabs.query({}, (tabs: any[]) => { for (const t of tabs || []) safeSend(t.id); });
+      } catch {}
+    }
+  } catch {}
 }
 
 setSample.addEventListener("click", () => {
@@ -642,6 +816,8 @@ async function sendChat(){
   if (chatSend) chatSend.disabled = true;
   // Persist chat log (lightweight)
   try { chrome.storage.local.set({ hive_popup_chat_log: chatMessages.slice(-100) }); } catch {}
+  // Record memory event (user-originated)
+  try { chrome.runtime.sendMessage({ type: 'HIVE_RECORD_MEMORY', payload: { origin: 'popup', event: { source:'user', type:'popup_chat', text: q } } }); } catch {}
 
   // Intent parsing to edit Persona directly via chat
   const handled = await tryHandleIntent(q);
@@ -652,6 +828,8 @@ async function sendChat(){
       chatMessages.push({ role: 'assistant', content: resp?.error ? String(resp.error) : 'Chat failed. Check provider in Config.' });
     } else {
       chatMessages.push({ role: 'assistant', content: resp.text || '(no text)' });
+      // Record assistant reply to memory bus
+      try { chrome.runtime.sendMessage({ type:'HIVE_RECORD_MEMORY', payload: { origin:'popup', event: { source:'gpt', role:'assistant', type:'popup_chat', text: resp.text || '' } } }); } catch {}
     }
     renderChat();
     if (chatSend) chatSend.disabled = false;
@@ -659,8 +837,96 @@ async function sendChat(){
   });
 }
 
-chatSend?.addEventListener('click', sendChat);
-chatInput?.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') { e.preventDefault(); sendChat(); } });
+// Click handling is managed by unified primary handler below
+chatInput?.addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (actionMode === 'send') return void sendChat();
+    if (actionMode === 'insert') return void pushToPage(false);
+    if (actionMode === 'insert_send') return void pushToPage(true);
+  }
+});
+
+// Unified action button mode
+type ActionMode = 'send' | 'insert' | 'insert_send';
+let actionMode: ActionMode = 'send';
+
+function setActionMode(mode: ActionMode){
+  actionMode = mode;
+  // Persist
+  try { chrome.storage.local.set({ hive_action_mode: mode }); } catch {}
+  updateActionUI();
+}
+
+function updateActionUI(){
+  if (actionPrimaryBtn){
+    actionPrimaryBtn.textContent = actionMode === 'send' ? 'Send' : (actionMode === 'insert' ? 'Insert' : 'Insert & Send');
+  }
+  if (actionMenuEl){
+    const btns = Array.from(actionMenuEl.querySelectorAll('button[data-mode]')) as HTMLButtonElement[];
+    for (const b of btns){ b.classList.toggle('active', b.getAttribute('data-mode') === actionMode); }
+  }
+}
+
+// Load stored action mode
+try { chrome.storage.local.get(['hive_action_mode'], (i:any)=>{ const m = i['hive_action_mode']; if (m === 'send' || m === 'insert' || m === 'insert_send') { actionMode = m; updateActionUI(); } }); } catch {}
+
+// Toggle dropdown
+actionModeBtn?.addEventListener('click', ()=>{ try { if (actionMenuEl) actionMenuEl.classList.toggle('open'); } catch {} });
+document.addEventListener('click', (ev)=>{ const t = ev.target as HTMLElement; if (!t) return; const menu = actionMenuEl; const modeBtn = actionModeBtn; if (!menu) return; if (t === menu || menu.contains(t) || t === modeBtn) return; menu.classList.remove('open'); });
+
+// Select mode from menu
+actionMenuEl?.addEventListener('click', (ev)=>{
+  const t = ev.target as HTMLElement;
+  if (t && t.matches('button[data-mode]')){
+    const m = t.getAttribute('data-mode') as ActionMode;
+    setActionMode(m);
+    if (actionMenuEl) actionMenuEl.classList.remove('open');
+  }
+});
+
+// Primary action click executes according to mode
+actionPrimaryBtn?.addEventListener('click', ()=>{
+  if (actionMode === 'send') return void sendChat();
+  if (actionMode === 'insert') return void pushToPage(false);
+  if (actionMode === 'insert_send') return void pushToPage(true);
+});
+
+function lastAssistantText(): string {
+  for (let i = chatMessages.length - 1; i >= 0; i--) {
+    if (chatMessages[i].role === 'assistant') return chatMessages[i].content || '';
+  }
+  return '';
+}
+
+function pushToPage(send:boolean){
+  try {
+    const text = lastAssistantText();
+    if (!text) { alert('No assistant message to insert'); return; }
+    // Target active provider tab
+    chrome.runtime.sendMessage({ type: 'HIVE_CHECK_CONN' }, (resp:any)=>{
+      const active = resp?.active || 'openai';
+      const origins: Record<string,string[]> = {
+        openai: ['https://chatgpt.com/*','https://*.openai.com/*'],
+        claude: ['https://claude.ai/*'],
+        gemini: ['https://gemini.google.com/*','https://*.google.com/*'],
+        grok: ['https://x.ai/*'],
+        deepseek: ['https://deepseek.com/*','https://*.deepseek.com/*']
+      };
+      const pats = origins[active] || [];
+      chrome.tabs.query({ url: pats.length ? pats : undefined }, (tabs:any[])=>{
+        if (!tabs || !tabs.length) { alert('No provider tab found.'); return; }
+        const id = tabs[0].id;
+        try { chrome.tabs.sendMessage(id, { type: 'HIVE_INSERT_TEXT', payload: { text, send } }, ()=>{ try { chrome.runtime.lastError; } catch {} }); } catch {}
+        // Record insert action to memory bus (summary)
+        try { chrome.runtime.sendMessage({ type:'HIVE_RECORD_MEMORY', payload: { origin:'popup', event: { source:'popup', type: send ? 'insert_and_send' : 'insert_text', text } } }); } catch {}
+      });
+    });
+  } catch {}
+}
+
+insertBtn?.addEventListener('click', ()=> pushToPage(false));
+insertSendBtn?.addEventListener('click', ()=> pushToPage(true));
 
 function updateTokenLabel() {
   const active = (providerSelect?.value || "openai") as ProviderId;
