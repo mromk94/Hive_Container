@@ -1,0 +1,16 @@
+{
+  "name": "omk-container",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OMK Container monorepo: Android-first Flutter mobile app + Node.js Hive Bridge backend.",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "hive-bridge",
+    "security-db"
+  ],
+  "scripts": {
+    "lint": "echo 'TODO: add lint tooling'",
+    "test": "npm run test --workspaces",
+    "test:hive-bridge": "npm --workspace hive-bridge test"
+  }
+}

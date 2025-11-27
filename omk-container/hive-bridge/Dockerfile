@@ -1,0 +1,13 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install --production
+
+COPY src ./src
+
+ENV PORT=4317
+EXPOSE 4317
+
+CMD ["node", "src/server.mjs"]

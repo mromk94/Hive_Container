@@ -1,0 +1,20 @@
+{
+  "name": "omk-hive-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.mjs",
+    "start": "node dist/server.mjs",
+    "build": "mkdir -p dist && cp -R src/* dist/",
+    "test": "node -e \"console.log('hive-bridge tests placeholder')\""
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "cors": "^2.8.5",
+    "morgan": "^1.10.0",
+    "pg": "^8.13.0",
+    "prom-client": "^15.1.3"
+  }
+}

@@ -1,6 +1,5 @@
-# Hive Container Chrome Extension — Blueprint
-
-This blueprint captures the vision, scope, architecture, security model, and a living, modular TODO for the Hive Container Chrome extension. It aligns with AIverse‑Hub, omakh‑Hive, and scout94.
+# Hive Container Chrome Extension — Phases 1–7 of the OMK Hybrid Grid: telemetry-driven connectivity modes wired into SecurityDecisionEngine and MemorySyncClient, offline-safe security decisions, L-Mesh/Federated Twins/AR scaffolding, and UNWIRED-COMPONENTS.md tracking everything not yet plugged into transports or UI.
+It aligns with AIverse‑Hub, omakh‑Hive, and scout94.
 
 ---
 
@@ -212,4 +211,31 @@ Implementation status:
 
 Next:
 - Cloud backup (end‑to‑end encrypted Vault) for cross‑device continuity.
-- Page‑side auto‑hydrate on focus (toggle) with hash dedupe.
+- Page-side auto-hydrate on focus (toggle) with hash dedupe.
+
+---
+
+## 17. OMK Container Mobile & Hive Bridge (High-level)
+
+OMK Container extends Hive Container to **mobile** and a companion **Hive Bridge backend**.
+
+- Mobile app (Flutter, Android-first):
+  - Hosts Persona editor, Profile, local chat, and continuity views.
+  - Stores an encrypted local Vault (SQLite) mirroring HiveMemoryVault semantics.
+  - Uses Kotlin plugins for secure key storage (KeyStore), TFLite, and background tasks.
+  - Now includes an in-app **OMK Wallet** and **Queen-backed LLM relay**:
+    - OMK Wallet tracks balance via Queen `/wallet/balance` + `/wallet/spend` endpoints and exposes a Wallet screen + mini balance pill in chat.
+    - OmkLlmClient estimates per-model OMK cost, calls the wallet `spend` API, and forwards chat requests to Queen `/llm/generate` across providers (OpenAI/Gemini/Claude/Grok/DeepSeek/local).
+    - ConsciousnessEngine routes all cloud replies through OmkLlmClient so that OMK spend and safety policy can be enforced centrally.
+
+- Hive Bridge (Node.js service):
+  - Thin adapter between mobile/extension clients and cloud LLMs (OpenAI, Gemini, etc.).
+  - Exposes safety-aware endpoints (e.g., /analyze, /escalate, /sync-bloom) and later full AI-Verse contracts.
+  - Will mediate sync between local Vaults and optional remote, end-to-end encrypted Vaults.
+
+Monorepo root: `omk-container/` (inside this repository).
+
+Key goals:
+- Keep contracts aligned with existing SessionRequest / ClientSignedToken and HiveMemoryVault.
+- Enable shared continuity between browser extension and mobile client.
+- Centralize safety filters and threat-intel logic in Hive Bridge while preserving client-side privacy.

@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#66000000">
+
+    <LinearLayout
+        android:id="@+id/assistant_root"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_margin="24dp"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="@drawable/overlay_assistant_background_dark">
+
+        <LinearLayout
+            android:id="@+id/connection_bar"
+            android:layout_width="match_parent"
+            android:layout_height="22dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:background="@drawable/overlay_connection_bar">
+
+            <TextView
+                android:id="@+id/status_cloud"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="CLOUD"
+                android:textAllCaps="true"
+                android:textColor="#FFD4AF37"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/status_mesh"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="MESH"
+                android:textAllCaps="true"
+                android:textColor="#66FFFFFF"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/status_local"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="LOCAL"
+                android:textAllCaps="true"
+                android:textColor="#66FFFFFF"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/assistant_icon"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@drawable/overlay_omk_badge"
+                android:contentDescription="OMK" />
+
+            <TextView
+                android:id="@+id/assistant_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="OMK Assistant"
+                android:textColor="#FFFFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/theme_toggle"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/overlay_theme_moon"
+                android:contentDescription="Toggle theme" />
+
+            <ImageButton
+                android:id="@+id/scan_button"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="4dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_camera"
+                android:tint="#FFD4AF37"
+                android:contentDescription="Scan screen" />
+        </LinearLayout>
+
+        <ScrollView
+            android:id="@+id/messages_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginTop="12dp">
+
+            <LinearLayout
+                android:id="@+id/messages_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/input_field"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Type a note or question"
+                android:background="@drawable/overlay_input_background"
+                android:padding="10dp"
+                android:textColor="#FFFFFFFF"
+                android:textColorHint="#99FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/send_button"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/overlay_send_button_background"
+                android:src="@android:drawable/ic_media_play"
+                android:tint="#FFFFFFFF"
+                android:contentDescription="Send" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/quick_actions_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/chip_analyze"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/overlay_quick_chip"
+                android:paddingLeft="14dp"
+                android:paddingTop="8dp"
+                android:paddingRight="14dp"
+                android:paddingBottom="8dp"
+                android:text="Analyze screen"
+                android:textColor="#FF101016"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/chip_summarize"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/overlay_quick_chip"
+                android:paddingLeft="14dp"
+                android:paddingTop="8dp"
+                android:paddingRight="14dp"
+                android:paddingBottom="8dp"
+                android:text="Summarize page"
+                android:textColor="#FF101016"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/chip_guard"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/overlay_quick_chip"
+                android:paddingLeft="14dp"
+                android:paddingTop="8dp"
+                android:paddingRight="14dp"
+                android:paddingBottom="8dp"
+                android:text="Guard me"
+                android:textColor="#FF101016"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/assistant_close"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/overlay_close_background"
+            android:text="Close"
+            android:textColor="#FF101016" />
+
+    </LinearLayout>
+
+</FrameLayout>
