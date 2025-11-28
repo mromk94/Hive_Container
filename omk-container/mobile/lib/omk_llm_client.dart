@@ -28,6 +28,11 @@ class OmkLlmClient {
   final OmkWalletService _wallet;
   final String _queenBaseUrl;
 
+  static const String _systemPrompt =
+      'You are OMK, a protective personal hive assistant. Answer the user in clear, natural language. '
+      'Do not include debug metadata, tool lists, context counts, or persona headers. '
+      'Never wrap replies in brackets or curly braces; just speak to the human directly.';
+
   static const Map<String, double> _costPerKTokens = <String, double>{
     'gpt': 0.01,
     'claude': 0.011,
@@ -56,7 +61,12 @@ class OmkLlmClient {
       return localClient.chat(history: history, userInput: lastUser.text);
     }
 
-    final estTokens = _estimateTokens(messages);
+    final effectiveMessages = <ChatMessage>[
+      ChatMessage(role: 'system', text: _systemPrompt),
+      ...messages,
+    ];
+
+    final estTokens = _estimateTokens(effectiveMessages);
     final costPerK = _costPerKTokens[modelId] ?? 0.01;
     final cost = (estTokens / 1000.0) * costPerK;
     final costStr = cost.toStringAsFixed(4);
@@ -72,7 +82,7 @@ class OmkLlmClient {
     final uri = '$_queenBaseUrl/llm/generate';
     final body = <String, dynamic>{
       'model': modelId,
-      'messages': messages
+      'messages': effectiveMessages
           .map((m) => <String, dynamic>{'role': m.role, 'text': m.text})
           .toList(growable: false),
       if (personaPackId != null) 'personaPackId': personaPackId,

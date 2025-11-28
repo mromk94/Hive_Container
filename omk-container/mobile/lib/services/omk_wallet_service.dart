@@ -90,6 +90,31 @@ class OmkWalletService {
     required String amountOmk,
     required String reason,
   }) async {
+    // First, try to satisfy the spend purely against the locally
+    // cached balance (which may include the 20 OMK welcome bonus)
+    // so that fresh installs can actually use their credits even if
+    // the backend wallet starts at 0.
+    try {
+      final existing = _cachedBalance ?? await loadCachedBalance();
+      final localStr = existing?.balanceOmk ?? '0';
+      final local = double.tryParse(localStr.trim()) ?? 0.0;
+      final amount = double.tryParse(amountOmk.trim()) ?? 0.0;
+
+      if (amount > 0 && local + 1e-9 >= amount) {
+        final remaining = local - amount;
+        final updated = OmkWalletBalance(
+          balanceOmk: remaining.toStringAsFixed(4),
+          lastUpdated: DateTime.now(),
+        );
+        await _persistBalance(updated);
+        return true;
+      }
+    } catch (_) {
+      // If local math fails for any reason, fall back to server.
+    }
+
+    // Fallback: ask Queen to perform the spend and treat its answer
+    // as the source of truth when available.
     final uri = '$_baseUrl/wallet/spend';
     try {
       final resp = await _dio.post<Map<String, dynamic>>(

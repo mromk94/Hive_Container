@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -25,16 +27,39 @@ import android.widget.TextView
 import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class OverlayBubbleService : Service() {
 
     private lateinit var windowManager: WindowManager
+    private lateinit var mainHandler: Handler
     private var bubbleView: View? = null
     private var assistantView: View? = null
     private lateinit var params: WindowManager.LayoutParams
 
     private val messages = mutableListOf<OverlayMessage>()
     private var isDarkTheme: Boolean = true
+    private val queenBaseUrl: String =
+        "https://omk-queen-ai-475745165557.us-central1.run.app"
+
+    private val costPerKTokens: Map<String, Double> = mapOf(
+        "gpt" to 0.01,
+        "claude" to 0.011,
+        "gemini" to 0.009,
+        "grok" to 0.009,
+        "deepseek" to 0.006,
+        "local" to 0.0,
+    )
+
+    private val systemPrompt: String =
+        "You are OMK, a protective personal hive assistant. Answer the user in clear, natural language. " +
+            "Do not include debug metadata, tool lists, context counts, or persona headers. " +
+            "Never wrap replies in brackets or curly braces; just speak to the human directly."
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -42,6 +67,7 @@ class OverlayBubbleService : Service() {
         super.onCreate()
         Log.d("OverlayBubbleService", "onCreate")
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        mainHandler = Handler(Looper.getMainLooper())
         // Initialise theme from the same shared preference as Flutter.
         isDarkTheme = loadThemeFromPrefs()
         addBubble()
@@ -176,11 +202,35 @@ class OverlayBubbleService : Service() {
             if (text.isEmpty()) return@setOnClickListener
             inputField.text?.clear()
             // Record the user message into the shared history and then
-            // hand off to the full OMK Assistant (Flutter + Queen).
+            // call the Queen-backed brain directly from the overlay.
             messages.add(OverlayMessage(text = text, isUser = true))
             saveMessagesToPrefs()
             renderMessages(messagesContainer, messagesScroll)
-            openMainActivity()
+
+            // Show a short thinking bubble while we wait for Queen.
+            messages.add(OverlayMessage(text = "Thinking…", isUser = false))
+            renderMessages(messagesContainer, messagesScroll)
+
+            requestQueenReply { reply, insufficientCost ->
+                // Remove the transient thinking bubble if present.
+                if (messages.isNotEmpty()) {
+                    val last = messages.last()
+                    if (!last.isUser && last.text.startsWith("Thinking")) {
+                        messages.removeAt(messages.size - 1)
+                    }
+                }
+
+                val finalText = when {
+                    insufficientCost != null ->
+                        "Not enough OMK to call the cloud model (needs ~$insufficientCost OMK). Open OMK to top up."
+                    reply.isNullOrBlank() ->
+                        "OMK could not reply right now."
+                    else -> reply.trim()
+                }
+                messages.add(OverlayMessage(text = finalText, isUser = false))
+                saveMessagesToPrefs()
+                renderMessages(messagesContainer, messagesScroll)
+            }
         }
 
         themeToggle.setOnClickListener {
@@ -203,29 +253,90 @@ class OverlayBubbleService : Service() {
         root.setOnClickListener { /* no-op: eat event */ }
 
         chipAnalyze.setOnClickListener {
-            // Mirror the quick action intent into shared history and then
-            // open the full assistant to run the real security pipeline.
             messages.add(OverlayMessage(text = "Analyze this screen", isUser = true))
-            messages.add(OverlayMessage(text = "Opening OMK to analyze this screen.", isUser = false))
             saveMessagesToPrefs()
             renderMessages(messagesContainer, messagesScroll)
-            openMainActivity()
+
+            messages.add(OverlayMessage(text = "Thinking…", isUser = false))
+            renderMessages(messagesContainer, messagesScroll)
+
+            requestQueenReply { reply, insufficientCost ->
+                if (messages.isNotEmpty()) {
+                    val last = messages.last()
+                    if (!last.isUser && last.text.startsWith("Thinking")) {
+                        messages.removeAt(messages.size - 1)
+                    }
+                }
+
+                val finalText = when {
+                    insufficientCost != null ->
+                        "Not enough OMK to analyze this screen (needs ~$insufficientCost OMK). Open OMK to top up."
+                    reply.isNullOrBlank() ->
+                        "Analyze failed in this build."
+                    else -> reply.trim()
+                }
+                messages.add(OverlayMessage(text = finalText, isUser = false))
+                saveMessagesToPrefs()
+                renderMessages(messagesContainer, messagesScroll)
+            }
         }
 
         chipSummarize.setOnClickListener {
             messages.add(OverlayMessage(text = "Summarize this page", isUser = true))
-            messages.add(OverlayMessage(text = "Opening OMK to summarize this context.", isUser = false))
             saveMessagesToPrefs()
             renderMessages(messagesContainer, messagesScroll)
-            openMainActivity()
+
+            messages.add(OverlayMessage(text = "Thinking…", isUser = false))
+            renderMessages(messagesContainer, messagesScroll)
+
+            requestQueenReply { reply, insufficientCost ->
+                if (messages.isNotEmpty()) {
+                    val last = messages.last()
+                    if (!last.isUser && last.text.startsWith("Thinking")) {
+                        messages.removeAt(messages.size - 1)
+                    }
+                }
+
+                val finalText = when {
+                    insufficientCost != null ->
+                        "Not enough OMK to summarize this page (needs ~$insufficientCost OMK). Open OMK to top up."
+                    reply.isNullOrBlank() ->
+                        "Summarize failed in this build."
+                    else -> reply.trim()
+                }
+                messages.add(OverlayMessage(text = finalText, isUser = false))
+                saveMessagesToPrefs()
+                renderMessages(messagesContainer, messagesScroll)
+            }
         }
 
         chipGuard.setOnClickListener {
             messages.add(OverlayMessage(text = "Guard me on this site", isUser = true))
-            messages.add(OverlayMessage(text = "Opening OMK Guard to watch this site.", isUser = false))
             saveMessagesToPrefs()
             renderMessages(messagesContainer, messagesScroll)
-            openMainActivity()
+
+            messages.add(OverlayMessage(text = "Thinking…", isUser = false))
+            renderMessages(messagesContainer, messagesScroll)
+
+            requestQueenReply { reply, insufficientCost ->
+                if (messages.isNotEmpty()) {
+                    val last = messages.last()
+                    if (!last.isUser && last.text.startsWith("Thinking")) {
+                        messages.removeAt(messages.size - 1)
+                    }
+                }
+
+                val finalText = when {
+                    insufficientCost != null ->
+                        "Not enough OMK to run Guard Me (needs ~$insufficientCost OMK). Open OMK to top up."
+                    reply.isNullOrBlank() ->
+                        "Guard Me could not start in this build."
+                    else -> reply.trim()
+                }
+                messages.add(OverlayMessage(text = finalText, isUser = false))
+                saveMessagesToPrefs()
+                renderMessages(messagesContainer, messagesScroll)
+            }
         }
 
         startBreathingAnimations(iconView, sendButton, scanButton, chipAnalyze, chipSummarize, chipGuard)
@@ -358,6 +469,11 @@ class OverlayBubbleService : Service() {
                 val role = obj.optString("role", "user")
                 val text = obj.optString("text", "")
                 val isUser = role == "user"
+                // Drop any legacy stub messages from early builds so
+                // they don't pollute the current chat overlay.
+                if (text.contains("stub", ignoreCase = true)) {
+                    continue
+                }
                 messages.add(OverlayMessage(text = text, isUser = isUser))
             }
         } catch (e: Exception) {
@@ -378,6 +494,188 @@ class OverlayBubbleService : Service() {
             prefs.edit().putString("flutter.omk_chat_history_v1", arr.toString()).apply()
         } catch (e: Exception) {
             Log.e("OverlayBubbleService", "Failed to save chat history", e)
+        }
+    }
+
+    private fun requestQueenReply(onResult: (String?, String?) -> Unit) {
+        Thread {
+            try {
+                val modelId = "gemini"
+                val tokens = estimateTokens()
+                val costStr = calculateCostOmk(tokens, modelId)
+
+                val spendOk = spendOmkWithQueen(costStr, "llm_call:$modelId")
+                if (!spendOk) {
+                    mainHandler.post { onResult(null, costStr) }
+                    return@Thread
+                }
+
+                val url = URL("$queenBaseUrl/llm/generate")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    doOutput = true
+                    connectTimeout = 15000
+                    readTimeout = 30000
+                }
+
+                val payload = buildQueenPayload(modelId)
+                conn.outputStream.use { os ->
+                    os.write(payload.toByteArray(Charsets.UTF_8))
+                }
+
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val raw = stream?.bufferedReader()?.use { it.readText() } ?: ""
+                val reply = parseQueenReply(raw)
+
+                mainHandler.post { onResult(reply, null) }
+            } catch (e: Exception) {
+                Log.e("OverlayBubbleService", "Queen request failed", e)
+                mainHandler.post { onResult(null, null) }
+            }
+        }.start()
+    }
+
+    private fun buildQueenPayload(modelId: String): String {
+        val root = JSONObject()
+        root.put("model", modelId)
+        val arr = JSONArray()
+
+        // Prepend a system message so Queen returns user-friendly text
+        // instead of debug-style metadata blobs.
+        val system = JSONObject()
+        system.put("role", "system")
+        system.put("text", systemPrompt)
+        arr.put(system)
+
+        for (m in messages) {
+            val obj = JSONObject()
+            obj.put("role", if (m.isUser) "user" else "assistant")
+            obj.put("text", m.text)
+            arr.put(obj)
+        }
+        root.put("messages", arr)
+        return root.toString()
+    }
+
+    private fun parseQueenReply(raw: String): String? {
+        if (raw.isBlank()) return null
+        return try {
+            val root = JSONObject(raw)
+            val response = root.opt("response")
+            when (response) {
+                is String -> response.trim().ifEmpty { null }
+                is JSONObject -> {
+                    val text = response.optString("text", response.optString("content", ""))
+                    text.trim().ifEmpty { null }
+                }
+                else -> null
+            }
+        } catch (e: Exception) {
+            Log.e("OverlayBubbleService", "Failed to parse Queen reply", e)
+            null
+        }
+    }
+
+    private fun estimateTokens(): Int {
+        var chars = 0
+        for (m in messages) {
+            chars += m.text.length
+        }
+        if (chars == 0) return 64
+        var est = chars / 4
+        if (est < 64) est = 64
+        if (est > 4000) est = 4000
+        return est
+    }
+
+    private fun calculateCostOmk(tokens: Int, modelId: String): String {
+        val perK = costPerKTokens[modelId] ?: 0.01
+        val cost = (tokens.toDouble() / 1000.0) * perK
+        return String.format(Locale.US, "%.4f", cost)
+    }
+
+    private fun spendOmkWithQueen(amountOmk: String, reason: String): Boolean {
+        // First, attempt to satisfy the spend purely against the
+        // locally cached balance (which may include the 20 OMK
+        // welcome bonus written by Flutter) so that fresh installs
+        // can actually use their credits even if the backend wallet
+        // starts at 0.
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val raw = prefs.getString("flutter.omk_wallet_balance_v1", null)
+            if (!raw.isNullOrBlank()) {
+                val obj = JSONObject(raw)
+                val balStr = obj.optString("balanceOmk", "0").trim()
+                val local = balStr.toDoubleOrNull() ?: 0.0
+                val amt = amountOmk.trim().toDoubleOrNull() ?: 0.0
+                if (amt > 0.0 && local + 1e-9 >= amt) {
+                    val remaining = local - amt
+                    persistWalletBalance(String.format(Locale.US, "%.4f", remaining))
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("OverlayBubbleService", "Local wallet math failed", e)
+        }
+
+        // Fallback: ask Queen to perform the spend and treat its
+        // response as the source of truth when available.
+        return try {
+            val url = URL("$queenBaseUrl/wallet/spend")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                doOutput = true
+                connectTimeout = 15000
+                readTimeout = 30000
+            }
+
+            val body = JSONObject().apply {
+                put("amountOmk", amountOmk)
+                put("reason", reason)
+            }
+            conn.outputStream.use { os ->
+                os.write(body.toString().toByteArray(Charsets.UTF_8))
+            }
+
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val raw = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (raw.isBlank()) return false
+
+            val data = JSONObject(raw)
+            val success = data.optBoolean("success", false)
+            if (!success) return false
+
+            val newBalance = data.optString("balanceOmk", "")
+            if (newBalance.isNotBlank()) {
+                persistWalletBalance(newBalance)
+            }
+            true
+        } catch (e: Exception) {
+            Log.e("OverlayBubbleService", "Wallet spend failed", e)
+            false
+        }
+    }
+
+    private fun persistWalletBalance(balanceOmk: String) {
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val nowIso = fmt.format(Date())
+            val obj = JSONObject().apply {
+                put("balanceOmk", balanceOmk)
+                put("lastUpdated", nowIso)
+            }
+            prefs.edit()
+                .putString("flutter.omk_wallet_balance_v1", obj.toString())
+                .apply()
+        } catch (e: Exception) {
+            Log.e("OverlayBubbleService", "Failed to persist wallet balance", e)
         }
     }
 

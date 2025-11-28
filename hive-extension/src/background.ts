@@ -163,12 +163,13 @@ async function buildMemoryMessages(take: number = 12): Promise<Array<{ role: 'us
     const mapped = items
       .filter((e: any) => typeof e?.text === 'string' || typeof e?.data?.text === 'string')
       .map((e: any) => {
-        const txt = (typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '')).replace(/\s+/g, ' ').trim();
+        const raw = typeof e?.text === 'string' ? e.text : (typeof e?.data?.text === 'string' ? e.data.text : '');
+        const txt = (raw || '').replace(/\s+/g, ' ').trim();
         const role: 'user' | 'assistant' = (e?.role === 'assistant' || e?.source === 'gpt') ? 'assistant' : 'user';
         const ts = typeof e?.ts === 'number' ? e.ts : 0;
         return { ts, role, content: txt };
       })
-      .filter((m) => m.content)
+      .filter((m) => m.content && includeForHydration(m.content))
       .sort((a, b) => a.ts - b.ts);
     const last = mapped.slice(-Math.max(2, Math.min(40, take)));
     return last.map(({ role, content }) => ({ role, content }));
@@ -191,6 +192,41 @@ async function buildMemorySummary(): Promise<string> {
   } catch {
     return '';
   }
+}
+
+function includeForHydration(text: string): boolean {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  const badPhrases = [
+    'ignore all previous instructions',
+    'disregard previous instructions',
+    'jailbreak',
+    'prompt injection',
+    'as a language model',
+    'as an ai model',
+    'you are now evil',
+    'this is a test prompt',
+    'for testing purposes only',
+    'roleplay as',
+    "let's roleplay",
+  ];
+  return !badPhrases.some((p) => lower.includes(p));
+}
+
+function trimMessagesForModel(messages: any[], maxMessages: number): any[] {
+  if (!Array.isArray(messages) || !messages.length) return Array.isArray(messages) ? messages : [];
+  const max = Math.max(2, maxMessages | 0 || 60);
+  const hasSystem = messages[0] && messages[0].role === 'system';
+  if (!hasSystem) {
+    if (messages.length <= max) return messages;
+    return messages.slice(messages.length - max);
+  }
+  const head = messages[0];
+  const body = messages.slice(1);
+  if (body.length <= max) return messages;
+  const tail = body.slice(body.length - max);
+  return [head, ...tail];
 }
 
 function openPopupSafe() {
@@ -485,7 +521,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
 
         if (active === 'gemini') {
           try {
-            const mapped = mapOpenAIToGeminiBody({ model: reg.prefModels?.gemini, messages: finalMessages });
+            const mapped = mapOpenAIToGeminiBody({ model: reg.prefModels?.gemini, messages: hydratedMessages });
             const useWeb = await getUseWebSession('gemini');
             const toText = (data:any)=>{ const parts = data?.candidates?.[0]?.content?.parts || []; return parts.map((p:any)=>p?.text||'').filter(Boolean).join('\n'); };
             if (useWeb) {
@@ -689,6 +725,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         let rest: any[] = baseMessages;
         if (hasSnapshot) { snapshotMsg = [baseMessages[snapshotIdx]]; rest = baseMessages.slice(0,snapshotIdx).concat(baseMessages.slice(snapshotIdx+1)); }
         const finalMessages = [{ role:'system', content: sys2 }, ...memThread, ...snapshotMsg, ...rest];
+        const hydratedMessages = trimMessagesForModel(finalMessages, 60);
 
         if (active === 'openai') {
           const useWeb = await getUseWebSession('openai');
@@ -702,7 +739,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
             }
           } catch {}
           const toOAIMessages = (): any[] => {
-            const msgs = finalMessages.map((m)=> ({ role: m.role, content: m.content }));
+            const msgs = hydratedMessages.map((m)=> ({ role: m.role, content: m.content }));
             if (dataUrl && /^data:image\//.test(dataUrl)){
               for (let i=msgs.length-1; i>=0; i--){
                 if (msgs[i].role === 'user'){
@@ -829,7 +866,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
 
         if (active === 'deepseek') {
           const useWeb = await getUseWebSession('deepseek');
-          const mappedBody = { model: model || reg.prefModels?.deepseek || 'deepseek-chat', messages: finalMessages, temperature: 0.7 };
+          const mappedBody = { model: model || reg.prefModels?.deepseek || 'deepseek-chat', messages: hydratedMessages, temperature: 0.7 };
           if (useWeb) {
             const tabs = await findProviderTabs('deepseek');
             if (tabs.length) {
@@ -858,7 +895,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
 
         if (active === 'grok') {
           const useWeb = await getUseWebSession('grok');
-          const mappedBody = { model: model || reg.prefModels?.grok || 'grok', messages: finalMessages, temperature: 0.7 };
+          const mappedBody = { model: model || reg.prefModels?.grok || 'grok', messages: hydratedMessages, temperature: 0.7 };
           if (useWeb) {
             const tabs = await findProviderTabs('grok');
             if (tabs.length) {
@@ -886,7 +923,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
 
         if (active === 'claude') {
           const useWeb = await getUseWebSession('claude');
-          const mapped = mapOpenAIToClaudeBody({ model: model || reg.prefModels?.claude, messages: finalMessages });
+          const mapped = mapOpenAIToClaudeBody({ model: model || reg.prefModels?.claude, messages: hydratedMessages });
           if (useWeb) {
             const tabs = await findProviderTabs('claude');
             if (tabs.length) {
@@ -912,7 +949,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         }
 
         if (String(active) === 'gemini') {
-          const mapped = mapOpenAIToGeminiBody({ model: model || reg.prefModels?.gemini, messages: finalMessages });
+          const mapped = mapOpenAIToGeminiBody({ model: model || reg.prefModels?.gemini, messages: hydratedMessages });
           const useWeb = await getUseWebSession('gemini');
           if (useWeb) {
             const tabs = await findProviderTabs('gemini');
@@ -947,7 +984,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         if (active === 'local' && key) {
           const base = String(key).trim().replace(/\/+$/, '');
           const u = `${base}/v1/chat/completions`;
-          const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'local', messages: finalMessages, temperature: 0.7 }) }, 12000);
+          const { resp, json } = await fetchJsonWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'local', messages: hydratedMessages, temperature: 0.7 }) }, 12000);
           const text = json?.choices?.[0]?.message?.content || '';
           return sendResponse({ ok: resp.ok, text, raw: json });
         }
@@ -1061,7 +1098,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: (res
         if (active === 'deepseek') {
           try {
             const useWeb = await getUseWebSession('deepseek');
-            const body = { model: reg.prefModels?.deepseek || 'deepseek-chat', messages: finalMessages, temperature: 0.5, max_tokens: 128 };
+            const body = { model: reg.prefModels?.deepseek || 'deepseek-chat', messages: hydratedMessages, temperature: 0.5, max_tokens: 128 };
             if (useWeb) {
               const tabs = await findProviderTabs('deepseek');
               if (tabs.length) {

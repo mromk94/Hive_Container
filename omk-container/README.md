@@ -22,7 +22,38 @@ OMK Container extends the existing Hive Container so a single persona + Vault ca
 - Downstream adapters via the Hive Bridge.
 
 ---
- 
+
+## Key Features (OMK mobile)
+
+- **Floating OMK Assistant bubble**  
+  A persistent assistant bubble that rides on top of Android apps. Tap it to open a compact chat surface that understands your persona and current context instead of acting like a generic chatbot.
+
+- **In‑app Assistant with shared memory**  
+  The full OMK Assistant lives inside the mobile app as well. Chat history is shared between the in‑app assistant and the floating bubble so conversations feel continuous, not like two separate bots.
+
+- **OMK Wallet & credits**  
+  A built‑in OMK wallet shows your current OMK balance, updates from the Queen backend, and lets you top up from a dedicated wallet screen. New users get a small **welcome bonus** so they can try cloud‑backed brains immediately.
+
+- **Queen‑backed brains with local fallback**  
+  The assistant can talk to cloud LLMs via a Queen relay when you have OMK credit, and automatically fall back to a lightweight local brain when you’re low on balance or offline.
+
+- **Quick actions: Analyze, Summarize, Guard me**  
+  One‑tap actions next to the chat box:
+  - **Analyze page** – inspects your current context and flags risky behavior using the AI Guardian pipeline.
+  - **Summarize** – condenses the recent conversation into a tight summary using an on‑device heuristic model.
+  - **Guard me** – turns on a protective VPN‑style guard that watches for dangerous sites and patterns while you browse.
+
+- **Import‑by‑Conversation (WIP)**  
+  A dedicated flow to “import” long external chats (e.g. ChatGPT threads) as conversations, distill them into persona traits, and add them to your vault without copy‑pasting huge walls of text.
+
+- **Onboarding with persona‑aware profile**  
+  A lightweight onboarding flow captures your name, age band, and preferred contact, then feeds this into the shared persona and UserProfile so the Queen and local brains can respond in a way that actually fits you.
+
+- **Dark/light theme that follows you**  
+  A theme toggle that applies to the in‑app assistant, the floating bubble, and the native overlay so the whole experience feels coherent rather than like three different tools.
+
+---
+
 ## Architecture Overview
  
 High-level layout (see `docs/MONOREPO-LAYOUT.md` for details):

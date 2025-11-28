@@ -1,0 +1,57 @@
+name: OMK Container CI
+
+on:
+  push:
+    paths:
+      - 'omk-container/**'
+      - '.github/workflows/omk-container-ci.yml'
+  pull_request:
+    paths:
+      - 'omk-container/**'
+
+jobs:
+  test-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install root deps
+        run: |
+          cd omk-container
+          npm install
+      - name: Run Hive Bridge tests
+        run: |
+          cd omk-container
+          npm run test:hive-bridge
+
+  test-flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Flutter pub get
+        run: |
+          cd omk-container/mobile
+          flutter pub get
+      - name: Run Flutter unit tests
+        run: |
+          cd omk-container/mobile
+          flutter test
+
+  build-android-debug:
+    runs-on: ubuntu-latest
+    needs: test-flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build Android debug APK (no signing)
+        run: |
+          cd omk-container/mobile
+          flutter pub get
+          flutter build apk --debug

@@ -41,7 +41,17 @@ class MiniChatController extends StateNotifier<List<ChatMessage>> {
     if (raw.isEmpty) return;
     final loaded = raw
         .map((e) => ChatMessage.fromJson(e))
-        .where((m) => m.text.trim().isNotEmpty)
+        .where((m) {
+          final text = m.text.trim();
+          if (text.isEmpty) return false;
+          // Strip any legacy "stub" messages from older builds so
+          // they do not pollute the current chat experience.
+          final lower = text.toLowerCase();
+          if (lower.contains('stub omk') || lower.startsWith('(stub')) {
+            return false;
+          }
+          return true;
+        })
         .toList();
     if (loaded.isNotEmpty) {
       state = loaded;
@@ -54,7 +64,15 @@ class MiniChatController extends StateNotifier<List<ChatMessage>> {
     if (raw.isEmpty) return;
     final loaded = raw
         .map((e) => ChatMessage.fromJson(e))
-        .where((m) => m.text.trim().isNotEmpty)
+        .where((m) {
+          final text = m.text.trim();
+          if (text.isEmpty) return false;
+          final lower = text.toLowerCase();
+          if (lower.contains('stub omk') || lower.startsWith('(stub')) {
+            return false;
+          }
+          return true;
+        })
         .toList();
     state = loaded;
   }
@@ -174,6 +192,8 @@ class MiniChatController extends StateNotifier<List<ChatMessage>> {
   }
 }
 
+bool onboardingCompletedBootstrap = false;
+
 final miniChatProvider =
     StateNotifierProvider<MiniChatController, List<ChatMessage>>(
   (ref) => MiniChatController(),
@@ -181,7 +201,8 @@ final miniChatProvider =
 
 final floatingEnabledProvider = StateProvider<bool>((ref) => true);
 final bubbleExpandedProvider = StateProvider<bool>((ref) => false);
-final onboardingCompletedProvider = StateProvider<bool>((ref) => false);
+final onboardingCompletedProvider =
+    StateProvider<bool>((ref) => onboardingCompletedBootstrap);
 final assistantOpenProvider = StateProvider<bool>((ref) => false);
 
 final navIndexProvider = StateProvider<int>((ref) => 0);

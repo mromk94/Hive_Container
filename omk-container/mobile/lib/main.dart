@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'assistant_screen.dart';
 import 'l10n.dart';
@@ -35,8 +36,11 @@ import 'wallet_screen.dart';
 
 final GlobalKey<NavigatorState> omkNavigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  onboardingCompletedBootstrap =
+      prefs.getBool('omk_onboarding_completed_v1') ?? false;
   UrlRiskModel.instance.load();
   AutonomyEngine.load();
   // Initialize mesh transport bridge to start listening for mesh events.

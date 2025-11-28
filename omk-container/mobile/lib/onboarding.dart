@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'l10n.dart';
 import 'state.dart';
 import 'consciousness_registry.dart';
+import 'permissions_screen.dart';
 
 class OnboardingFlow extends ConsumerStatefulWidget {
   const OnboardingFlow({super.key});
@@ -62,10 +64,12 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     );
     await ConsciousnessRegistryStore.save(reg);
     ref.read(onboardingCompletedProvider.notifier).state = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('omk_onboarding_completed_v1', true);
   }
 
   void _next() {
-    const totalPages = 4;
+    const totalPages = 5;
     if (_index < totalPages - 1) {
       _controller.nextPage(
         duration: const Duration(milliseconds: 200),
@@ -86,8 +90,10 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: () {
+                onPressed: () async {
                   ref.read(onboardingCompletedProvider.notifier).state = true;
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('omk_onboarding_completed_v1', true);
                 },
                 child: Text(strings.onboardingSkip),
               ),
@@ -123,6 +129,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
                       });
                     },
                   ),
+                  _PermissionsOnboardingPage(),
                 ],
               ),
             ),
@@ -162,6 +169,57 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PermissionsOnboardingPage extends StatelessWidget {
+  const _PermissionsOnboardingPage();
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = Strings.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(Icons.verified_user_outlined, size: 72),
+          const SizedBox(height: 24),
+          Text(
+            strings.permissionsTitle,
+            textAlign: TextAlign.center,
+            style: Theme.of(context)
+                .textTheme
+                .headlineSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            strings.permOverlayReason,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            strings.permMicReason,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PermissionsScreen(),
+                ),
+              );
+            },
+            child: Text(strings.permissionsTitle),
+          ),
+        ],
       ),
     );
   }

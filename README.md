@@ -6,6 +6,7 @@ This repository is part of a modular, multi‑repo ecosystem implementing the AI
 - **omakh‑Hive** — Infrastructure Nexus. The decentralized task market and orchestration layer. Axons (agents) register skills and pick up tasks ("pollen"). A Queen component coordinates and delegates.
 - **scout94** — Reference Axon (Agent). A practical worker agent that can browse, interact with files, and execute code; designed to plug into the Hive and execute tasks.
 - **Hive_Container** — Runtime/DevOps. Ops tooling to compose and run the ecosystem across local and cloud environments. (This repo)
+  - Includes **OMK Container** (`omk-container/`), the Android‑first mobile Hive Container + Hive Bridge that brings the continuity/consent layer to the phone.
 
 Links: https://github.com/mromk94/AIverse-Hub • https://github.com/mromk94/omakh-Hive • https://github.com/mromk94/scout94 • https://github.com/mromk94/Hive_Container
 
@@ -59,6 +60,7 @@ Canonical continuity layer for AI-Verse. Provides local encryption, Personality 
 - The_Shared_Consciousness_Loop_SCL.md — SCL whitepaper variant
 - SECURITY.md — Security policy and reporting guidance
 - CODE_OF_CONDUCT.md — Community standards and reporting
+ - `omk-container/README.md` — OMK Container mobile app & Hive Bridge overview (features, flows, and dev notes)
 
 ## Cross-Project Links
 - AI-Verse repository: https://github.com/mromk94/AIverse-Hub

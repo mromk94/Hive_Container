@@ -11,6 +11,7 @@ import 'omk_llm_client.dart';
 import 'wallet_screen.dart';
 import 'consciousness_registry.dart';
 import 'consciousness_engine.dart';
+import 'permissions_screen.dart';
 
 class AssistantScreen extends ConsumerWidget {
   const AssistantScreen({super.key});
@@ -283,6 +284,7 @@ class _OmkMiniChatState extends ConsumerState<_OmkMiniChat> {
     final messages = ref.watch(miniChatProvider);
     final reversed = messages.reversed.toList(growable: false);
     final textTheme = Theme.of(context).textTheme;
+    final hasMic = ref.watch(microphonePermissionGrantedProvider);
 
     final dark = ref.watch(assistantDarkModeProvider);
 
@@ -394,6 +396,43 @@ class _OmkMiniChatState extends ConsumerState<_OmkMiniChat> {
                 ),
                 style: textTheme.bodyMedium?.copyWith(
                   color: dark ? Colors.white : const Color(0xFF101016),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFF3A3012),
+              ),
+              child: IconButton(
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                onPressed: () async {
+                  final micGranted =
+                      ref.read(microphonePermissionGrantedProvider);
+                  if (!micGranted) {
+                    if (!mounted) return;
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PermissionsScreen(),
+                      ),
+                    );
+                    return;
+                  }
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content:
+                          Text('Voice input is not wired to transcription in this build.'),
+                    ),
+                  );
+                },
+                icon: Icon(
+                  Icons.mic_rounded,
+                  color: hasMic ? Colors.white : Colors.white70,
                 ),
               ),
             ),
